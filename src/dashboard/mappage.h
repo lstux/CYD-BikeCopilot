@@ -20,13 +20,16 @@ Track track;
 SPIClass sdSPI(VSPI);
 bool sdOk = false;
 
-static int mapZoomIdx = 1;
+static int mapZoomIdx = 3;
+static bool zoomAvail[5] = {false, false, true, true, true};
+static float panX = 0, panY = 0;  // décalage de la vue par rapport à la position (pixels au zoom courant)
+static uint32_t lastPanMs = 0;
 static int projZ = -1;
 static bool mapForce = true;
 static bool noFixShown = false;
 static int32_t lastOx = 0, lastOy = 0;
 static uint32_t lastMapMs = 0;
-static char lastKey[96];
+static char lastKey[128];
 static float lastHeading = 0;
 
 static void mapMessage(const char *msg, uint16_t color) {
@@ -44,19 +47,45 @@ static float navHeading(float kmh) {
   return lastHeading;
 }
 
-static void mapCycleZoom() {
-  mapZoomIdx = (mapZoomIdx + 1) % 3;
+static void mapSetZoom(int n) {
+  float k = powf(2.0f, (float)(MAP_ZOOMS[n] - MAP_ZOOMS[mapZoomIdx]));
+  panX *= k;
+  panY *= k;
+  mapZoomIdx = n;
   mapForce = true;
 }
 
-static void mapZoomStep(int d) {
-  int n = mapZoomIdx + d;
-  if (n < 0) n = 0;
-  if (n > 2) n = 2;
-  if (n != mapZoomIdx) {
-    mapZoomIdx = n;
-    mapForce = true;
+static int mapNextZoom(int d) {
+  for (int n = mapZoomIdx + d; n >= 0 && n < 5; n += d)
+    if (zoomAvail[n]) return n;
+  return -1;
+}
+
+static void mapCycleZoom() {
+  int n = mapNextZoom(+1);
+  if (n < 0) {  // retour au plus petit zoom disponible
+    n = 0;
+    while (n < 4 && !zoomAvail[n]) n++;
   }
+  mapSetZoom(n);
+}
+
+static void mapZoomStep(int d) {
+  int n = mapNextZoom(d);
+  if (n >= 0) mapSetZoom(n);
+}
+
+static void mapDrag(int dx, int dy) {
+  panX -= dx;
+  panY -= dy;
+  lastPanMs = millis();
+}
+
+static bool mapPanned() { return fabsf(panX) > 0.5f || fabsf(panY) > 0.5f; }
+
+static void mapRecenter() {
+  panX = panY = 0;
+  mapForce = true;
 }
 
 static void mapEnter() {
@@ -64,6 +93,20 @@ static void mapEnter() {
   noFixShown = false;
   lastKey[0] = 0;
   lastMapMs = 0;
+  panX = panY = 0;
+  if (sdOk) {  // quels zooms sont présents sur la carte SD ?
+    for (int i = 0; i < 5; i++) {
+      char d[16];
+      snprintf(d, sizeof(d), "/tiles/%d", MAP_ZOOMS[i]);
+      zoomAvail[i] = SD.exists(d);
+    }
+    if (!zoomAvail[mapZoomIdx]) {
+      int best = -1;
+      for (int i = 0; i < 5; i++)
+        if (zoomAvail[i] && (best < 0 || abs(i - 3) < abs(best - 3))) best = i;
+      if (best >= 0) mapZoomIdx = best;
+    }
+  }
 }
 
 static void renderMapPage(uint32_t now) {
@@ -85,13 +128,14 @@ static void renderMapPage(uint32_t now) {
   }
   noFixShown = false;
   if (now - lastMapMs < 300) return;
+  if (mapPanned() && now - lastPanMs > 20000) mapRecenter();  // retour automatique sur la position
 
   const int z = MAP_ZOOMS[mapZoomIdx];
   double lat = gps.location.lat(), lon = gps.location.lng();
   double wxd, wyd;
   worldPx(lat, lon, z, wxd, wyd);
-  int32_t ox = (int32_t)floor(wxd) - MAP_CX;
-  int32_t oy = (int32_t)floor(wyd) - MAP_CY;
+  int32_t ox = (int32_t)floor(wxd + panX) - MAP_CX;
+  int32_t oy = (int32_t)floor(wyd + panY) - MAP_CY;
 
   float kmh = currentKmh();
   MapView v;
@@ -99,21 +143,28 @@ static void renderMapPage(uint32_t now) {
   v.z = z;
   v.spd = (int)(kmh + 0.5f);
   v.heading = navHeading(kmh);
+  v.hasDest = destValid;
+  v.posX = (int)(wxd - ox);
+  v.posY = (int)(wyd - oy) + MAP_Y0;
+  v.canIn = mapNextZoom(+1) >= 0;
+  v.canOut = mapNextZoom(-1) >= 0;
+  v.panned = mapPanned();
   v.hasTrack = track.valid();
   if (v.hasTrack) {
     float off = track.follow(lat, lon);
     v.onTrack = off < 60.0f;
     v.remain = track.remainingM();
     if (v.onTrack) v.hasTurn = track.nextTurn(v.turnD, v.turnA);
-  } else {
+  } else if (destValid) {
     v.remain = (float)TinyGPSPlus::distanceBetween(lat, lon, destLat, destLon);
   }
   splitDist(v.turnNum, sizeof(v.turnNum), v.turnUnit, v.turnD);
-  splitDist(v.remNum, sizeof(v.remNum), v.remUnit, v.remain);
+  if (v.hasTrack || destValid) splitDist(v.remNum, sizeof(v.remNum), v.remUnit, v.remain);
+  else { strcpy(v.remNum, "--"); v.remUnit[0] = 0; }
   v.st = currentStatus();
   {  // heure d'arrivée estimée
     int mins = (int)(v.remain / 1000.0f / etaSpeedKmh() * 60.0f + 0.5f);
-    if (gps.time.isValid()) {
+    if (gps.time.isValid() && (v.hasTrack || destValid)) {
       int t = ((gps.time.hour() + cfg.tz + 24) % 24) * 60 + gps.time.minute() + mins;
       snprintf(v.eta, sizeof(v.eta), "%02d:%02d", (t / 60) % 24, t % 60);
     } else {
@@ -131,10 +182,10 @@ static void renderMapPage(uint32_t now) {
   }
 
   // Faut-il redessiner ?
-  char key[96];
-  snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s%s|%s%s|%s|%s|%d%d%d|%d", v.spd, z, (int)(v.heading / 8), v.onTrack,
+  char key[128];
+  snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s%s|%s%s|%s|%s|%d%d%d|%d|%d|%d|%d", v.spd, z, (int)(v.heading / 8), v.onTrack,
            v.hasTurn, v.turnNum, v.turnUnit, v.remNum, v.remUnit, v.eta, v.st.clock, v.st.sats, v.st.fix, v.st.rec,
-           (int)v.turnA / 10);
+           (int)v.turnA / 10, (int)panX, (int)panY, v.homeVisible);
   bool moved = labs((long)(ox - lastOx)) >= 2 || labs((long)(oy - lastOy)) >= 2;
   if (!mapForce && !moved && strcmp(key, lastKey) == 0) return;
   strncpy(lastKey, key, sizeof(lastKey) - 1);
@@ -164,6 +215,15 @@ static void renderMapPage(uint32_t now) {
   double dx, dy;
   worldPx(destLat, destLon, z, dx, dy);
   int32_t dsx = (int32_t)dx - ox, dsy = (int32_t)dy - oy + MAP_Y0;
+  {  // domicile
+    if (cfg.homeOk) {
+      double hx, hy;
+      worldPx(cfg.homeLat, cfg.homeLon, z, hx, hy);
+      v.homeX = (int)((int32_t)hx - ox);
+      v.homeY = (int)((int32_t)hy - oy) + MAP_Y0;
+      v.homeVisible = v.homeX > -12 && v.homeX < 332 && v.homeY > -12 && v.homeY < 252;
+    }
+  }
   v.destVisible = dsx > -12 && dsx < 332 && dsy > MAP_Y0 - 12 && dsy < 252;
   v.dsx = (int)dsx;
   v.dsy = (int)dsy;

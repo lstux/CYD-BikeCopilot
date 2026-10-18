@@ -6,7 +6,7 @@ using namespace gfx;
 
 static const int MAP_Y0 = 0, MAP_H = 240, BAND_H = 20;  // carte plein écran, composée en 12 bandes
 static const int MAP_CX = 160, MAP_CY = 150;                  // la position est dans le tiers bas : on voit devant
-static const uint8_t MAP_ZOOMS[3] = {15, 16, 17};
+static const uint8_t MAP_ZOOMS[5] = {13, 14, 15, 16, 17};
 static const uint16_t MAP_BG = RGB565(10, 15, 20);
 static const uint16_t MAP_BLUE = RGB565(42, 107, 255);
 static const uint16_t MAP_ROUTE_DARK = RGB565(6, 42, 61);
@@ -26,8 +26,12 @@ struct MapView {
   float heading;
   bool hasTrack, onTrack, hasTurn;
   float turnD, turnA, remain;
-  bool destVisible;
+  bool destVisible, hasDest;
   int dsx, dsy;
+  int posX, posY;           // position GPS à l'écran (peut sortir de l'écran quand on déplace la carte)
+  bool homeVisible;
+  int homeX, homeY;
+  bool canIn, canOut, panned;
   char turnNum[8], turnUnit[3], remNum[8], remUnit[3], eta[8];
   int scalePx, scaleM;  // longueur de l'échelle
   char scaleTxt[10];
@@ -99,20 +103,30 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
     }
   }
 
+  // Domicile : pastille avec une petite maison
+  if (v.homeVisible && inBand(by, v.homeY - 11, v.homeY + 11)) {
+    disc(S, v.homeX, v.homeY, 10.0f, col::ACCENT);
+    disc(S, v.homeX, v.homeY, 8.6f, col::CARD);
+    float rx[3] = {v.homeX - 5.5f, v.homeX, v.homeX + 5.5f}, ry[3] = {v.homeY - 0.5f, v.homeY - 6.0f, v.homeY - 0.5f};
+    polygon(S, rx, ry, 3, col::TXT);
+    rect(S, v.homeX - 3, v.homeY - 1, 6, 5, col::TXT);
+    rect(S, v.homeX - 1, v.homeY + 1, 2, 3, col::CARD);
+  }
+
   // Destination
-  if (v.destVisible && inBand(by, v.dsy - 11, v.dsy + 11)) {
+  if (v.destVisible && v.hasDest && inBand(by, v.dsy - 11, v.dsy + 11)) {
     disc(S, v.dsx, v.dsy, 9.5f, col::TXT);
     disc(S, v.dsx, v.dsy, 7.5f, col::RED);
     disc(S, v.dsx, v.dsy, 2.2f, col::TXT);
   }
 
   // Position : halo, disque blanc cerclé de bleu, pointe orientée selon le cap (nord en haut)
-  if (inBand(by, MAP_CY - 16, MAP_CY + 16)) {
-    disc(S, MAP_CX, MAP_CY, 13.0f, col::ACCENT, 46);
-    disc(S, MAP_CX, MAP_CY, 7.5f, col::TXT);
-    circle(S, MAP_CX, MAP_CY, 6.8f, 1.6f, MAP_BLUE);
+  if (inBand(by, v.posY - 16, v.posY + 16)) {
+    disc(S, v.posX, v.posY, 13.0f, col::ACCENT, 46);
+    disc(S, v.posX, v.posY, 7.5f, col::TXT);
+    circle(S, v.posX, v.posY, 6.8f, 1.6f, MAP_BLUE);
     float a = v.heading * 0.017453292f, ca = cosf(a), sa = sinf(a);
-    auto R = [&](float px_, float py_, float &ox, float &oy) { ox = MAP_CX + px_ * ca - py_ * sa; oy = MAP_CY + px_ * sa + py_ * ca; };
+    auto R = [&](float px_, float py_, float &ox, float &oy) { ox = v.posX + px_ * ca - py_ * sa; oy = v.posY + px_ * sa + py_ * ca; };
     float xs[3], ys[3];
     R(0, -8, xs[0], ys[0]); R(4, 1, xs[1], ys[1]); R(0, -1, xs[2], ys[2]);
     polygon(S, xs, ys, 3, MAP_BLUE);
@@ -154,10 +168,21 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
     disc(S, cx, cy, 1.6f, col::BG);
   }
 
+  // Bouton « recentrer » (visible seulement quand la carte a été déplacée)
+  if (v.panned && inBand(by, 62, 96)) {
+    card(S, 5, 64, 31, 31, 9, col::CARD, col::BORDER);
+    circle(S, 20.5f, 79.5f, 6.0f, 1.6f, col::ACCENT);
+    disc(S, 20.5f, 79.5f, 2.2f, col::ACCENT);
+    for (int k = 0; k < 4; k++) {
+      float dxk = k == 0 ? 1 : (k == 1 ? -1 : 0), dyk = k == 2 ? 1 : (k == 3 ? -1 : 0);
+      line(S, 20.5f + dxk * 6.5f, 79.5f + dyk * 6.5f, 20.5f + dxk * 10.0f, 79.5f + dyk * 10.0f, 1.6f, col::ACCENT);
+    }
+  }
+
   // Boutons de zoom
   if (inBand(by, 88, 156)) {
-    mapPlusMinus(S, 284, 89, true, zoomIdx < 2);
-    mapPlusMinus(S, 284, 125, false, zoomIdx > 0);
+    mapPlusMinus(S, 284, 89, true, v.canIn);
+    mapPlusMinus(S, 284, 125, false, v.canOut);
   }
 
   // Échelle et attribution (obligatoire)

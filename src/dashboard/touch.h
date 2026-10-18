@@ -5,11 +5,16 @@
 #include <Arduino.h>
 #include <Preferences.h>
 
-enum TouchEvent { TE_NONE, TE_TAP, TE_LONG, TE_SWIPE_L, TE_SWIPE_R };
+enum TouchEvent { TE_NONE, TE_TAP, TE_LONG, TE_SWIPE_L, TE_SWIPE_R, TE_DRAG };
+// Mode de glissé : DRAG_XY (carte : glissé libre, sauf depuis les bords gauche/droit qui gardent le
+// changement de page), DRAG_Y (listes : glissé vertical).
+enum DragMode { DRAG_NONE, DRAG_XY, DRAG_Y };
 
 class Touch {
  public:
   int x = 0, y = 0;  // position de l'évènement (pixels écran)
+  int dx = 0, dy = 0;  // TE_DRAG : déplacement depuis l'évènement précédent
+  DragMode dragMode = DRAG_NONE;
 
   void begin(int clk, int mosi, int miso, int cs, int irq, int w, int h) {
     clk_ = clk; mosi_ = mosi; miso_ = miso; cs_ = cs; irq_ = irq; w_ = w; h_ = h;
@@ -103,9 +108,28 @@ class Touch {
       if (!pressed_) {
         pressed_ = true;
         longSent_ = false;
+        dragging_ = false;
         sx0_ = sx; sy0_ = sy; t0_ = now;
       }
       cx_ = sx; cy_ = sy;
+      if (!dragging_ && !longSent_ && dragMode != DRAG_NONE) {
+        int adx = abs(cx_ - sx0_), ady = abs(cy_ - sy0_);
+        bool xy = dragMode == DRAG_XY && sx0_ >= 30 && sx0_ <= 290 && (adx > 10 || ady > 10);
+        bool yy = dragMode == DRAG_Y && ady > 10 && ady > adx;
+        if (xy || yy) {
+          dragging_ = true;
+          gx_ = sx0_; gy_ = sy0_;
+        }
+      }
+      if (dragging_) {
+        dx = dragMode == DRAG_Y ? 0 : cx_ - gx_;
+        dy = cy_ - gy_;
+        if (dx || dy) {
+          gx_ = cx_; gy_ = cy_;
+          return TE_DRAG;
+        }
+        return TE_NONE;
+      }
       if (!longSent_ && now - t0_ > 900 && abs(cx_ - sx0_) < 20 && abs(cy_ - sy0_) < 20) {
         longSent_ = true;
         x = sx0_; y = sy0_;
@@ -116,6 +140,10 @@ class Touch {
     // relâché : on attend 40 ms sans contact pour éviter les rebonds
     if (pressed_ && now - lastSeen_ > 40) {
       pressed_ = false;
+      if (dragging_) {
+        dragging_ = false;
+        return TE_NONE;
+      }
       if (longSent_) return TE_NONE;
       int dx = cx_ - sx0_, dy = cy_ - sy0_;
       uint32_t d = lastSeen_ - t0_;
@@ -130,8 +158,8 @@ class Touch {
   int clk_ = 25, mosi_ = 32, miso_ = 39, cs_ = 33, irq_ = 36, w_ = 320, h_ = 240;
   bool calibrated_ = false, swap_ = false;
   int x0_ = 0, x1_ = 4095, y0_ = 0, y1_ = 4095, margin_ = 20;
-  bool pressed_ = false, longSent_ = false;
-  int sx0_ = 0, sy0_ = 0, cx_ = 0, cy_ = 0;
+  bool pressed_ = false, longSent_ = false, dragging_ = false;
+  int sx0_ = 0, sy0_ = 0, cx_ = 0, cy_ = 0, gx_ = 0, gy_ = 0;
   uint32_t t0_ = 0, lastSeen_ = 0, lastPoll_ = 0;
 
   static int median5(int *v) {

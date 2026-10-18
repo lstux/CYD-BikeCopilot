@@ -5,7 +5,17 @@
 #include "page_gauge.h"
 #include "page_compass.h"
 #include "page_map.h"
+// --- fausses données pour les pages qui lisent l'état global (Réglages) ---
 static const int NB_PAGES = 5;
+static TFT_eSPI tft;
+struct FakeLoc { bool isValid() { return true; } uint32_t age() { return 0; } double lat() { return 48.1; } double lng() { return 2.3; } };
+struct FakeGps { FakeLoc location; } gps;
+struct TripLogger { enum State { IDLE, PENDING, ACTIVE }; State st = ACTIVE; State state() const { return st; } void finish() {} } logger;
+struct FakeTrip { double distM = 12400; } trip;
+#include "settings.h"
+static Settings cfg;
+static void updateDestination() {}
+#include "settingspage.h"
 
 static void save(TFT_eSPI &t, const char *dir, const char *name) {
   char p[256];
@@ -15,7 +25,6 @@ static void save(TFT_eSPI &t, const char *dir, const char *name) {
 
 int main(int argc, char **argv) {
   const char *dir = argc > 1 ? argv[1] : ".";
-  TFT_eSPI tft;
   TFT_eSprite spr(&tft);
   spr.createSprite(pg_gauge::SW, pg_gauge::SH);
 
@@ -62,6 +71,7 @@ int main(int argc, char **argv) {
     strcpy(v.turnNum, "120"); strcpy(v.turnUnit, "m"); strcpy(v.remNum, "4.2"); strcpy(v.remUnit, "km");
     strcpy(v.eta, "14:31"); v.scalePx = 64; strcpy(v.scaleTxt, "100 m");
     v.st = st;
+    v.hasDest = true; v.posX = 160; v.posY = 150; v.homeVisible = true; v.homeX = 60; v.homeY = 110; v.canIn = true; v.canOut = true; v.panned = true;
     int ax[3][4] = {{0, 165, 640, 165}, {65, 0, 65, 240}, {0, 20, 320, 75}};
     Seg route[3] = {{160, 150, 160, 95}, {160, 95, 235, 95}, {235, 95, 235, 6}};
     nVis = 3;
@@ -80,5 +90,12 @@ int main(int argc, char **argv) {
     }
     save(tft, dir, "map");
   }
+
+  // --- réglages ---
+  tft.fillScreen(col::BG);
+  hud::statusBar(scr, st);
+  cfg.tz = 2; cfg.gaugeMin = 15; cfg.logOn = true; cfg.homeOk = true; cfg.homeLat = 48.1234; cfg.homeLon = 2.3456;
+  settingsEnter();
+  save(tft, dir, "settings");
   return 0;
 }

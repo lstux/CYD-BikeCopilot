@@ -50,7 +50,7 @@ L'échelle part de 15 km/h. Dès que la vitesse la dépasse, elle passe au palie
 La carte microSD (FAT32) contient :
 
 ```
-/tiles/<zoom>/<x>/<y>.raw   tuiles 256×256 en RGB565 (131072 octets), zooms 15, 16, 17
+/tiles/<zoom>/<x>/<y>.raw   tuiles 256×256 en RGB565 (131072 octets), zooms 13 à 17 (ceux présents sur la SD)
 /route.gpx                  trace à suivre (optionnelle) ; son dernier point devient la destination
 ```
 
@@ -65,7 +65,11 @@ python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/   # thème
 
 Puis copier le contenu de `sd/` à la racine de la carte. `--dry-run` compte les tuiles sans rien faire.
 Le téléchargement est plafonné (`--max-tiles`) : la [politique des serveurs OSM](https://operations.osmfoundation.org/policies/tiles/) interdit le téléchargement massif ; pour une grande zone, utiliser un autre fournisseur ou `--png-dir`.
-Sans `route.gpx`, la carte s'affiche quand même, centrée sur la position, avec la destination de `config.h`.
+Sans `route.gpx`, la carte s'affiche quand même, centrée sur la position.
+
+**Destination** (page Direction, distance restante et heure d'arrivée) : dernier point de `route.gpx` s'il existe, sinon la position « Domicile », sinon aucune. Pour enregistrer le domicile : page Réglages → *Domicile* → *Définir ici* (il faut un fix GPS). Une icône de maison le marque sur la carte.
+
+**Page carte** : glisser un doigt pour déplacer la vue (depuis les bords gauche/droit, un glissé change de page), bouton cible pour recentrer (retour automatique après 20 s), boutons + / − pour le zoom (5 niveaux, grisés si les tuiles du niveau manquent sur la SD ; appui long = zoom suivant). Pour dézoomer plus loin, générer des niveaux supplémentaires : `--zoom 13 14 15 16 17`.
 
 La SD est sur le bus VSPI (IO5/18/19/23), l'écran sur HSPI (`-DUSE_HSPI_PORT`).
 

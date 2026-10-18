@@ -47,7 +47,8 @@ bool sprOk = false;
 static const int NB_PAGES = 5;  // 0 compteur, 1 direction, 2 carte, 3 trajets, 4 réglages
 
 // Destination : dernier point de la trace GPX si elle existe, sinon celle de config.h
-double destLat = DEST_LAT, destLon = DEST_LON;
+double destLat = 0, destLon = 0;
+bool destValid = false;  // destination connue : fin de la trace GPX, sinon position « Domicile »
 
 static float currentKmh();
 static void pollGps() {
@@ -62,6 +63,8 @@ static void localTime(char *out, size_t n) {
   int h = (gps.time.hour() + cfg.tz + 24) % 24;
   snprintf(out, n, "%02d:%02d", h, gps.time.minute());
 }
+
+static gfx::Surf scr() { return gfx::onScreen(tft, col::BG); }
 
 static hud::Status currentStatus() {
   hud::Status st;
@@ -82,6 +85,20 @@ static float etaSpeedKmh() {
 }
 
 #include "mappage.h"
+
+static void updateDestination() {
+  if (track.valid()) {
+    destLat = track.destLat();
+    destLon = track.destLon();
+    destValid = true;
+  } else if (cfg.homeOk) {
+    destLat = cfg.homeLat;
+    destLon = cfg.homeLon;
+    destValid = true;
+  } else {
+    destValid = false;
+  }
+}
 #include "histpage.h"
 #include "settingspage.h"
 
@@ -154,8 +171,6 @@ static bool makeSprite(int w, int h) {
 }
 
 // --- Barre d'état ---
-static gfx::Surf scr() { return gfx::onScreen(tft, col::BG); }
-
 static void drawStatusBar(bool force = false) {
   static char cache[32];
   hud::Status st = currentStatus();
@@ -244,7 +259,7 @@ static void drawStats() {
 // Page 1 : direction
 // =====================================================================
 struct DirState {
-  bool fix = false;
+  bool fix = false, haveDest = false;
   float heading = 0, bearing = 0, rel = 0;  // rel : -180..180, > 0 = à droite
   double distM = 0;
   const char *src = "boussole";
@@ -260,7 +275,8 @@ static DirState dirState() {
   } else if (compass.ok() && compass.calibrated()) {
     d.heading = compass.heading(COMPASS_OFFSET_DEG, COMPASS_INVERT);
   }
-  if (d.fix) {
+  d.haveDest = d.fix && destValid;
+  if (d.haveDest) {
     d.distM = TinyGPSPlus::distanceBetween(gps.location.lat(), gps.location.lng(), destLat, destLon);
     d.bearing = (float)TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), destLat, destLon);
     d.rel = pg_compass::norm360(d.bearing - d.heading + 180.0f) - 180.0f;
@@ -269,7 +285,7 @@ static DirState dirState() {
 }
 
 static void distStrings(const DirState &d, char *num, size_t n, const char *&unit) {
-  if (!d.fix) { snprintf(num, n, "--"); unit = ""; }
+  if (!d.haveDest) { snprintf(num, n, "--"); unit = ""; }
   else if (d.distM < 1000) { snprintf(num, n, "%d", (int)d.distM); unit = "m"; }
   else if (d.distM < 10000) { snprintf(num, n, "%.1f", d.distM / 1000.0); unit = "km"; }
   else { snprintf(num, n, "%d", (int)(d.distM / 1000.0 + 0.5)); unit = "km"; }
@@ -287,7 +303,7 @@ static void drawCompass() {
   lastH = d.heading; lastB = d.bearing; strcpy(lastNum, num);
   frameForce = false;
   gfx::Surf s = gfx::onSprite(spr, pg_compass::SX, pg_compass::SY);
-  pg_compass::draw(s, d.heading, d.bearing, d.fix, num, unit);
+  pg_compass::draw(s, d.heading, d.bearing, d.haveDest, num, unit);
   spr.pushSprite(pg_compass::SX, pg_compass::SY);
 }
 
@@ -302,19 +318,19 @@ static void drawDirectionTiles() {
     strcpy(destCache[0], key);
     pg_compass::tileUpdate(scr(), 4, v, col::TXT, pg_compass::cardinalName(d.heading), d.src);
   }
-  if (d.fix) {
+  if (d.haveDest) {
     snprintf(v, sizeof(v), "%d°", (int)(d.bearing + 0.5f) % 360);
     snprintf(s2, sizeof(s2), "%s %d°", d.rel >= 0 ? "droite" : "gauche", (int)(fabsf(d.rel) + 0.5f));
     strcpy(s1, pg_compass::cardinal16(d.bearing));
   } else {
     snprintf(v, sizeof(v), "--");
     s1[0] = '\0';
-    snprintf(s2, sizeof(s2), "attente GPS");
+    snprintf(s2, sizeof(s2), d.fix ? "aucune dest." : "attente GPS");
   }
   snprintf(key, sizeof(key), "%s|%s|%s", v, s1, s2);
   if (strcmp(key, destCache[1]) != 0) {
     strcpy(destCache[1], key);
-    pg_compass::tileUpdate(scr(), 251, v, d.fix ? col::ACCENT : col::SEC, s1, s2);
+    pg_compass::tileUpdate(scr(), 251, v, d.haveDest ? col::ACCENT : col::SEC, s1, s2);
   }
 }
 
@@ -439,8 +455,13 @@ static void drawResetModal() {
 }
 
 static void handleTouch() {
+  touch.dragMode = (page == 2 && !modalReset) ? DRAG_XY : DRAG_NONE;
   TouchEvent e = touch.poll(millis());
   if (e == TE_NONE) return;
+  if (e == TE_DRAG) {
+    if (page == 2) mapDrag(touch.dx, touch.dy);
+    return;
+  }
   if (modalReset) {
     if (e == TE_TAP && touch.y >= 120 && touch.y <= 170) {
       if (touch.x >= 165 && touch.x <= 275) {
@@ -469,10 +490,8 @@ static void handleTouch() {
     if (a == SA_CALIB_TOUCH) touchCalibrate();
     if (a == SA_RESET_COMPASS) {
       compass.resetCalibration();
-      tft.fillRect(0, SET_Y0 + 5 * SET_ROW_H, 320, SET_ROW_H, col::BG);
-      tft.setTextDatum(ML_DATUM);
-      tft.setTextColor(col::ORANGE, col::BG);
-      tft.drawString("Tournez la carte sur elle-meme", 8, SET_Y0 + 5 * SET_ROW_H + 17, 2);
+      settingsSetNote(5, "tournez la carte sur elle-même");
+      drawSettingsRow(5);
     }
     return;
   }
@@ -488,6 +507,7 @@ static void handleTouch() {
     case TE_TAP:
       if (page == 2) {
         if (touch.x >= 268 && touch.y >= 80 && touch.y <= 166) mapZoomStep(touch.y < 122 ? +1 : -1);
+        else if (mapPanned() && touch.x < 46 && touch.y >= 58 && touch.y <= 102) mapRecenter();
       }
       break;
     case TE_LONG:
@@ -608,6 +628,7 @@ static void renderSlow() {
   if (page != 2 || !sdOk || noFixShown) drawStatusBar();
   if (page == 0) drawStats();
   else if (page == 1) drawDirectionTiles();
+  else if (page == 4) settingsRefresh();
 }
 
 void setup() {
@@ -628,10 +649,9 @@ void setup() {
   sdOk = SD.begin(SD_CS_PIN, sdSPI, 20000000, "/sd", 8);
   Serial.printf("Carte SD : %s\n", sdOk ? "OK" : "absente");
   if (sdOk && track.load(GPX_PATH)) {
-    destLat = track.destLat();
-    destLon = track.destLon();
     Serial.printf("Trace GPX : %d points, %.1f km\n", track.count(), track.totalM() / 1000.0f);
   }
+  updateDestination();
   if (sdOk) {
     logger.begin();
     tripsRebuildIndex();

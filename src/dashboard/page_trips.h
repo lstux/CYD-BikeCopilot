@@ -102,6 +102,19 @@ static void drawDetailHeader(const Surf &s, const TripSummary &t, int tz) {
   char a[40];
   fmtDateLong(t.t0, tz, a, sizeof(a));
   text(s, FONT_S13, 36, 38, a, col::TXT);
+  card(s, 244, 24, 71, 20, 8, col::CARD, col::BORDER);
+  text(withBg(s, col::CARD), FONT_S11, 279, 38, "Supprimer", col::RED, AL_C);
+}
+
+// Fenêtre de confirmation de suppression (zone des boutons : y 118..148, gauche = annuler)
+static void drawConfirmDelete(const Surf &s) {
+  card(s, 40, 86, 240, 68, 12, col::CARD, col::ACCENT);
+  Surf c = withBg(s, col::CARD);
+  text(c, FONT_S13, 160, 108, "Supprimer ce trajet ?", col::TXT, AL_C);
+  roundRect(s, 56, 120, 94, 24, 8, col::SURF2);
+  text(withBg(s, col::SURF2), FONT_S11, 103, 136, "Annuler", col::TXT, AL_C);
+  roundRect(s, 170, 120, 94, 24, 8, col::RED);
+  text(withBg(s, col::RED), FONT_S11, 217, 136, "Supprimer", col::BG, AL_C);
 }
 
 static void tile(const Surf &s, int i, const char *label, const char *value, uint16_t vc, const char *sub) {

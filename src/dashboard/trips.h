@@ -258,6 +258,26 @@ static bool indexHas(const char *name) {
 
 static void tripPath(const char *name, char *out, size_t n) { snprintf(out, n, "%s/%s.csv", TRIP_DIR, name); }
 
+// Supprime un trajet : le fichier et sa ligne dans l'index (réécrit via un fichier temporaire)
+static bool tripDelete(const char *name) {
+  char path[64];
+  tripPath(name, path, sizeof(path));
+  SD.remove(path);
+  const char *tmp = "/trips/index.tmp";
+  SD.remove(tmp);
+  File out = SD.open(tmp, FILE_WRITE);
+  if (!out) return false;
+  size_t nl = strlen(name);
+  forEachLine(TRIP_INDEX, [&](const char *l) {
+    if (strncmp(l, name, nl) == 0 && l[nl] == ',') return;
+    out.print(l);
+    out.print("\n");
+  });
+  out.close();
+  SD.remove(TRIP_INDEX);
+  return SD.rename(tmp, TRIP_INDEX);  // en cas d'échec, l'index est reconstruit au prochain démarrage
+}
+
 // Ajoute à l'index les fichiers .csv qui n'y figurent pas (coupure de courant pendant un trajet)
 static void tripsRebuildIndex() {
   File dir = SD.open(TRIP_DIR);

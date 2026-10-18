@@ -139,6 +139,8 @@ int main(int argc, char **argv) {
     cs.pushSprite(5, pg_trips::CHART_Y[1]);
     hud::pageDots(scr, 3, NB_PAGES);
     save(tft, dir, "detail");
+    pg_trips::drawConfirmDelete(scr);
+    save(tft, dir, "confirm");
   }
   return 0;
 }

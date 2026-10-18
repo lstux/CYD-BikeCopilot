@@ -179,7 +179,12 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
     }
   }
 
-  // Boutons de zoom
+  // Boutons de zoom et niveau de zoom
+  if (inBand(by, 76, 88)) {
+    char zt[8];
+    snprintf(zt, sizeof(zt), "z%d", v.z);
+    text(S, FONT_S9, 299, 85, zt, col::SEC, AL_C, 1);
+  }
   if (inBand(by, 88, 156)) {
     mapPlusMinus(S, 284, 89, true, v.canIn);
     mapPlusMinus(S, 284, 125, false, v.canOut);

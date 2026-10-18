@@ -15,6 +15,7 @@ static TripSeries histSer;
 static int histCursor = -1;  // colonne du curseur dans les courbes, -1 si absent
 static int histAcc = 0;      // glissé vertical accumulé (pixels)
 static bool histSprOk = false;
+static bool histConfirm = false;  // fenêtre « Supprimer ce trajet ? » affichée
 
 static uint32_t histNowEpoch() {
   if (gps.date.isValid() && gps.time.isValid() && gps.date.year() >= 2024)
@@ -97,6 +98,7 @@ static void drawHistDetail() {
 
 static void histEnter() {
   histSprOk = false;
+  histConfirm = false;
   if (sdOk) histN = indexLoad(hist, HIST_MAX);
   else histN = 0;
   if (histTop >= histN) histTop = 0;
@@ -107,6 +109,7 @@ static void histEnter() {
 
 static void histBack() {
   histSel = -1;
+  histConfirm = false;
   histSprOk = false;
   spr.deleteSprite();
   drawHistList();
@@ -145,7 +148,7 @@ static void histDrag(int dy) {
 // Curseur des courbes : x = position du doigt à l'écran
 static void histCursorAt(int x) {
   using namespace pg_trips;
-  if (histSel < 0 || !histSprOk) return;
+  if (histSel < 0 || !histSprOk || histConfirm) return;
   int c = x - 5 - CH_X0;
   const int W = CH_X1 - CH_X0 + 1;
   if (c < 0) c = 0;
@@ -159,8 +162,31 @@ static void histCursorAt(int x) {
 static bool histTap(int x, int y) {
   using namespace pg_trips;
   if (histSel >= 0) {
-    if (y < 46) histBack();  // en-tête : retour à la liste
-    else if (y >= CHART_Y[0]) histCursorAt(x);
+    if (histConfirm) {
+      if (y >= 118 && y <= 148 && x >= 160 && x <= 270) {  // confirmer
+        char name[24];
+        snprintf(name, sizeof(name), "%s", hist[histN - 1 - histSel].name);
+        tripDelete(name);
+        histConfirm = false;
+        histN = indexLoad(hist, HIST_MAX);
+        if (histTop >= histN) histTop = histN > ROWS ? histN - ROWS : 0;
+        histBack();
+      } else {  // annuler (ou toucher à côté)
+        histConfirm = false;
+        drawHistDetail();
+      }
+      return true;
+    }
+    if (y < 46) {
+      if (x >= 236) {
+        histConfirm = true;
+        drawConfirmDelete(scr());
+      } else {
+        histBack();  // en-tête : retour à la liste
+      }
+    } else if (y >= CHART_Y[0]) {
+      histCursorAt(x);
+    }
     return true;
   }
   histAcc = 0;

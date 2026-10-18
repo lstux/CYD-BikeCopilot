@@ -16,7 +16,7 @@ Bouton BOOT : appui court = page suivante, appui long (> 1 s) = remise à zéro 
 
 ### Échelle de la jauge
 
-L'échelle part de 15 km/h. Dès que la vitesse la dépasse, elle passe au palier de 5 au-dessus (20, 25, 30…). Elle ne redescend d'un cran qu'après 8 s nettement sous le palier inférieur (moins de 80 % de sa valeur), pour éviter les sauts. Réglages dans `src/dashboard/config.h` (`GAUGE_*`).
+L'échelle part de 15 km/h. Dès que la vitesse la dépasse, elle passe au palier de 5 au-dessus (20, 25, 30…). Elle ne redescend d'un cran qu'après 8 s nettement sous le palier inférieur (moins de 80 % de sa valeur), pour éviter les sauts. Réglages dans `src/dashboard/config.h` (`GAUGE_*`). Pour tester à pied : `pio run -e dashboard-walk -t upload` (la jauge démarre à 5 km/h).
 
 ## Page carte : préparer la carte SD
 

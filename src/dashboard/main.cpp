@@ -455,11 +455,15 @@ static void drawResetModal() {
 }
 
 static void handleTouch() {
-  touch.dragMode = (page == 2 && !modalReset) ? DRAG_XY : DRAG_NONE;
+  touch.dragMode = modalReset ? DRAG_NONE : (page == 2 ? DRAG_XY : (page == 3 ? (histSel >= 0 ? DRAG_XY : DRAG_Y) : DRAG_NONE));
   TouchEvent e = touch.poll(millis());
   if (e == TE_NONE) return;
   if (e == TE_DRAG) {
     if (page == 2) mapDrag(touch.dx, touch.dy);
+    else if (page == 3) {
+      if (histSel >= 0) histCursorAt(touch.curX());
+      else histDrag(touch.dy);
+    }
     return;
   }
   if (modalReset) {
@@ -477,8 +481,7 @@ static void handleTouch() {
   }
   // Détail d'un trajet : un glissé ramène à la liste au lieu de changer de page
   if (page == 3 && histSel >= 0 && (e == TE_SWIPE_L || e == TE_SWIPE_R)) {
-    histSel = -1;
-    drawHistList();
+    histBack();
     return;
   }
   if (e == TE_TAP && page == 3) {

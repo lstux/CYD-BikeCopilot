@@ -5,6 +5,7 @@
 #include "page_gauge.h"
 #include "page_compass.h"
 #include "page_map.h"
+#include "page_trips.h"
 // --- fausses données pour les pages qui lisent l'état global (Réglages) ---
 static const int NB_PAGES = 5;
 static TFT_eSPI tft;
@@ -97,5 +98,47 @@ int main(int argc, char **argv) {
   cfg.tz = 2; cfg.gaugeMin = 15; cfg.logOn = true; cfg.homeOk = true; cfg.homeLat = 48.1234; cfg.homeLon = 2.3456;
   settingsEnter();
   save(tft, dir, "settings");
+
+  // --- trajets (liste) ---
+  {
+    tft.fillScreen(col::BG);
+    hud::statusBar(scr, st);
+    pg_trips::Week w; w.km = 56.2f; w.n = 4; w.secs = 3 * 3600 + 8 * 60;
+    pg_trips::drawSummary(scr, w);
+    TripSummary t[5];
+    const float d[5] = {12400, 24800, 7400, 11600, 3100};
+    const float mx[5] = {34.2f, 38.1f, 31.6f, 33.0f, 22.0f};
+    for (int i = 0; i < 5; i++) {
+      t[i].t0 = epochFromDate(2026, 10, 18 - (i == 0 ? 0 : i + (i > 2)), 11 + i, 56, 0);
+      t[i].distM = d[i]; t[i].durS = (uint32_t)(d[i] / 5.0f); t[i].avgKmh = 17.5f; t[i].maxKmh = mx[i];
+    }
+    for (int r = 0; r < pg_trips::ROWS; r++) pg_trips::drawRow(scr, r, t[r], t[r].distM / 24800.0f, 2);
+    pg_trips::drawScrollBar(scr, 0, 9);
+    hud::pageDots(scr, 3, NB_PAGES);
+    save(tft, dir, "trips");
+
+    // --- détail ---
+    tft.fillScreen(col::BG);
+    hud::statusBar(scr, st);
+    TripSummary &c = t[0];
+    c.up = 128; c.down = 96;
+    pg_trips::drawDetailHeader(scr, c, 2);
+    pg_trips::drawDetailTiles(scr, c);
+    static TripSeries ser;
+    for (int i = 0; i < TripSeries::N; i++) {
+      float f = i / (float)(TripSeries::N - 1);
+      ser.spd[i] = 17 + 9 * sinf(f * 17.0f) + 5 * sinf(f * 41.0f) + (f > 0.9f ? -8 * (f - 0.9f) * 10 : 0);
+      if (ser.spd[i] < 0) ser.spd[i] = 0;
+      ser.alt[i] = 100 + 25 * sinf(f * 6.0f) + 12 * f;
+    }
+    TFT_eSprite cs(&tft);
+    cs.createSprite(pg_trips::CH_W, pg_trips::CH_H);
+    pg_trips::drawChart(cs, "VITESSE", "max 34.2 km/h", ser.spd, TripSeries::N, 0, 37.6f, col::ACCENT, 140, "27.4 km/h · 7.1 km");
+    cs.pushSprite(5, pg_trips::CHART_Y[0]);
+    pg_trips::drawChart(cs, "ALTITUDE", "80 – 140 m", ser.alt, TripSeries::N, 80, 140, col::OK, 140, "118 m · 7.1 km");
+    cs.pushSprite(5, pg_trips::CHART_Y[1]);
+    hud::pageDots(scr, 3, NB_PAGES);
+    save(tft, dir, "detail");
+  }
   return 0;
 }

@@ -14,7 +14,7 @@ FONT_DIR = sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/opentype/inte
 OUT = os.path.join(os.path.dirname(__file__), "..", "src", "dashboard", "fonts_data.h")
 
 DIG = "0123456789"
-NUM = DIG + ".:-+°%/ "
+NUM = DIG + ".:-+°%/ h!−"
 ACC = "éèêëàâîïôùûçÉÈÀÊ°·−–›‹…'’©"
 TXT = "".join(chr(c) for c in range(32, 127)) + ACC
 

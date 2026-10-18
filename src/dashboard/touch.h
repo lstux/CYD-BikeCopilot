@@ -39,6 +39,8 @@ class Touch {
   }
 
   bool calibrated() const { return calibrated_; }
+  int curX() const { return cx_; }  // position actuelle du doigt (pendant un glissé)
+  int curY() const { return cy_; }
 
   // Valeurs brutes (médiane de 5 mesures). false si pas d'appui.
   bool readRaw(int &rx, int &ry) {

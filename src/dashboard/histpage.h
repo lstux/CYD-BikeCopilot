@@ -1,146 +1,102 @@
 #pragma once
-// Page « Trajets » : liste des trajets enregistrés, puis détail (stats + courbes vitesse / altitude).
-// Inclus par main.cpp (utilise tft, col::, cfg, trips.h).
+// Page « Trajets » : liste des trajets enregistrés (défilement au doigt), puis détail
+// (tuiles + courbes vitesse / altitude avec curseur). Le dessin est dans page_trips.h.
+// Inclus par main.cpp (utilise tft, spr, col::, cfg, gps, trips.h).
+#include "page_trips.h"
 
-#define HIST_MAX   48
-#define HIST_ROWS  5
+#define HIST_MAX 48
 
 static TripSummary hist[HIST_MAX];
 static int histN = 0;
-static int histTop = 0;      // rang (0 = plus récent) de la première ligne affichée
-static int histSel = -1;     // -1 = liste, sinon rang du trajet affiché en détail
+static int histTop = 0;   // rang (0 = plus récent) de la première ligne affichée
+static int histSel = -1;  // -1 = liste, sinon rang du trajet affiché en détail
 static TripSummary histCur;
 static TripSeries histSer;
+static int histCursor = -1;  // colonne du curseur dans les courbes, -1 si absent
+static int histAcc = 0;      // glissé vertical accumulé (pixels)
+static bool histSprOk = false;
 
-static void fmtDate(uint32_t epoch, char *out, size_t n) {
-  int y, mo, d, h, mi, s;
-  localParts(epoch, cfg.tz, y, mo, d, h, mi, s);
-  snprintf(out, n, "%02d/%02d %02d:%02d", d, mo, h, mi);
+static uint32_t histNowEpoch() {
+  if (gps.date.isValid() && gps.time.isValid() && gps.date.year() >= 2024)
+    return epochFromDate(gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(),
+                         gps.time.second());
+  return histN > 0 ? hist[histN - 1].t0 : 0;
 }
 
-static void fmtDur(uint32_t secs, char *out, size_t n) {
-  if (secs >= 3600)
-    snprintf(out, n, "%luh%02lu", (unsigned long)(secs / 3600), (unsigned long)((secs % 3600) / 60));
-  else
-    snprintf(out, n, "%lu min", (unsigned long)((secs + 30) / 60));
-}
-
-static void drawArrowBtn(int x, int y, int w, int h, bool up, bool enabled) {
-  tft.fillRoundRect(x, y, w, h, 6, col::TRACK);
-  uint16_t c = enabled ? col::WHITE : col::RULE;
-  int cx = x + w / 2, cy = y + h / 2;
-  if (up)
-    tft.fillTriangle(cx - 9, cy + 6, cx + 9, cy + 6, cx, cy - 7, c);
-  else
-    tft.fillTriangle(cx - 9, cy - 6, cx + 9, cy - 6, cx, cy + 7, c);
+static void drawHistRows() {
+  using namespace pg_trips;
+  Surf s = scr();
+  rect(s, 0, LIST_Y - 1, 320, ROWS * ROW_H, col::BG);
+  float maxD = 1;
+  for (int i = 0; i < histN; i++)
+    if (hist[i].distM > maxD) maxD = hist[i].distM;
+  for (int r = 0; r < ROWS; r++) {
+    int idx = histTop + r;
+    if (idx >= histN) break;
+    const TripSummary &t = hist[histN - 1 - idx];
+    drawRow(s, r, t, t.distM / maxD, cfg.tz);
+  }
+  drawScrollBar(s, histTop, histN);
 }
 
 static void drawHistList() {
-  tft.fillRect(0, 24, 320, 216, col::BG);
-  tft.setTextPadding(0);
+  using namespace pg_trips;
+  Surf s = scr();
+  clearContent(s);
+  hud::pageDots(s, 3, NB_PAGES);
   if (histN == 0) {
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextColor(col::DIM, col::BG);
-    tft.drawString(sdOk ? "Aucun trajet enregistre" : "Carte SD absente", 160, 120, 2);
+    drawEmpty(s, sdOk);
     return;
   }
-  for (int r = 0; r < HIST_ROWS; r++) {
-    int idx = histTop + r;
-    if (idx >= histN) break;
-    const TripSummary &s = hist[histN - 1 - idx];
-    int y = 28 + r * 38;
-    char a[24], b[24], c[40];
-    tft.fillRoundRect(4, y, 262, 34, 5, col::TRACK);
-    fmtDate(s.t0, a, sizeof(a));
-    tft.setTextDatum(TL_DATUM);
-    tft.setTextColor(col::WHITE, col::TRACK);
-    tft.drawString(a, 12, y + 2, 2);
-    snprintf(b, sizeof(b), "%.1f km", s.distM / 1000.0f);
-    tft.setTextDatum(TR_DATUM);
-    tft.drawString(b, 258, y + 2, 2);
-    fmtDur(s.durS, a, sizeof(a));
-    snprintf(c, sizeof(c), "%s   moy %.1f   max %.0f", a, s.avgKmh, s.maxKmh);
-    tft.setTextDatum(TL_DATUM);
-    tft.setTextColor(col::LABEL, col::TRACK);
-    tft.drawString(c, 12, y + 18, 2);
+  Week w;
+  uint32_t now = histNowEpoch();
+  for (int i = 0; i < histN; i++) {
+    const TripSummary &t = hist[i];
+    if (t.t0 + 7UL * 86400UL >= now) {
+      w.km += t.distM / 1000.0f;
+      w.n++;
+      w.secs += t.durS;
+    }
   }
-  drawArrowBtn(272, 28, 44, 80, true, histTop > 0);
-  drawArrowBtn(272, 116, 44, 80, false, histTop + HIST_ROWS < histN);
+  drawSummary(s, w);
+  drawHistRows();
 }
 
-// Courbe en aire : valeurs v[0..n-1] ramenées sur w pixels
-static void drawGraph(int x, int y, int w, int h, const float *v, int n, float vmin, float vmax, uint16_t line,
-                      uint16_t fill, const char *title) {
-  tft.fillRect(x - 2, y, w + 4, h, col::BG);
-  tft.drawFastHLine(x, y + h - 1, w, col::RULE);
-  float span = vmax - vmin;
-  if (span < 0.01f) span = 1;
-  int prev = -1;
-  for (int px = 0; px < w; px++) {
-    float val = v[px * (n - 1) / (w - 1)];
-    int yy = (int)((val - vmin) / span * (h - 3));
-    if (yy < 0) yy = 0;
-    if (yy > h - 3) yy = h - 3;
-    int top = y + h - 2 - yy;
-    tft.drawFastVLine(x + px, top, y + h - 1 - top, fill);
-    if (prev >= 0) {  // relie au point précédent pour une ligne continue
-      int a = prev < top ? prev : top, b = prev < top ? top : prev;
-      tft.drawFastVLine(x + px, a, b - a + 1, line);
-    } else {
-      tft.drawPixel(x + px, top, line);
-    }
-    tft.drawPixel(x + px, top, line);
-    prev = top;
-  }
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextPadding(0);
-  tft.setTextColor(col::TEXT2, col::BG);
-  tft.drawString(title, x + 4, y + 1, 2);
+// Les deux cartes de courbes (le sprite est conservé tant qu'on est dans le détail)
+static void histDrawCharts() {
+  using namespace pg_trips;
+  if (!histSprOk) return;
+  const int W = CH_X1 - CH_X0 + 1, N = TripSeries::N;
+  int idx = histCursor >= 0 ? histCursor * (N - 1) / (W - 1) : 0;
+  char r1[32], r2[32], c1[40], c2[40];
+  float km = histCur.distM / 1000.0f * idx / (N - 1);
+  snprintf(r1, sizeof(r1), "max %.1f km/h", histCur.maxKmh);
+  snprintf(r2, sizeof(r2), "%.0f – %.0f m", histSer.altMin, histSer.altMax);
+  snprintf(c1, sizeof(c1), "%.1f km/h · %.1f km", histSer.spd[idx], km);
+  snprintf(c2, sizeof(c2), "%.0f m · %.1f km", histSer.alt[idx], km);
+  drawChart(spr, "VITESSE", r1, histSer.spd, N, 0, histSer.spdMax * 1.1f, col::ACCENT, histCursor, c1);
+  spr.pushSprite(5, CHART_Y[0]);
+  drawChart(spr, "ALTITUDE", r2, histSer.alt, N, histSer.altMin, histSer.altMax, col::OK, histCursor, c2);
+  spr.pushSprite(5, CHART_Y[1]);
 }
 
 static void drawHistDetail() {
-  tft.fillRect(0, 24, 320, 216, col::BG);
-  const TripSummary &s = histCur;
-  char a[40], b[40];
-  tft.setTextPadding(0);
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(col::DIM, col::BG);
-  tft.drawString("<", 6, 26, 2);
-  fmtDate(s.t0, a, sizeof(a));
-  tft.setTextColor(col::WHITE, col::BG);
-  tft.drawString(a, 22, 26, 2);
-  snprintf(a, sizeof(a), "%.1f km", s.distM / 1000.0f);
-  tft.drawString(a, 112, 26, 2);
-  fmtDur(s.durS, a, sizeof(a));
-  tft.drawString(a, 200, 26, 2);
-
-  snprintf(a, sizeof(a), "moy %.1f", s.avgKmh);
-  snprintf(b, sizeof(b), "max %.1f", s.maxKmh);
-  tft.setTextColor(col::LABEL, col::BG);
-  tft.drawString(a, 6, 44, 2);
-  tft.drawString(b, 90, 44, 2);
-  snprintf(a, sizeof(a), "D+ %d m", (int)s.up);
-  snprintf(b, sizeof(b), "D- %d m", (int)s.down);
-  tft.setTextColor(col::GREEN, col::BG);
-  tft.drawString(a, 180, 44, 2);
-  tft.setTextColor(col::ORANGE, col::BG);
-  tft.drawString(b, 252, 44, 2);
-
-  char t1[40], t2[48];
-  snprintf(t1, sizeof(t1), "Vitesse (km/h)  max %.0f", histSer.spdMax);
-  snprintf(t2, sizeof(t2), "Altitude (m)  %.0f a %.0f", histSer.altMin, histSer.altMax);
-  drawGraph(10, 66, 300, 78, histSer.spd, TripSeries::N, 0, histSer.spdMax * 1.05f, col::CYAN, RGB565(0, 55, 70), t1);
-  drawGraph(10, 150, 300, 78, histSer.alt, TripSeries::N, histSer.altMin, histSer.altMax, col::GREEN,
-            RGB565(0, 60, 25), t2);
-  tft.setTextDatum(BR_DATUM);
-  tft.setTextColor(col::DIM, col::BG);
-  snprintf(a, sizeof(a), "%.1f km", s.distM / 1000.0f);
-  tft.drawString(a, 310, 239, 2);
-  tft.setTextDatum(BL_DATUM);
-  tft.drawString("0", 10, 239, 2);
+  using namespace pg_trips;
+  Surf s = scr();
+  clearContent(s);
+  drawDetailHeader(s, histCur, cfg.tz);
+  drawDetailTiles(s, histCur);
+  hud::pageDots(s, 3, NB_PAGES);
+  spr.deleteSprite();
+  spr.setColorDepth(16);
+  histSprOk = spr.createSprite(CH_W, CH_H) != nullptr;
+  histCursor = -1;
+  if (histSprOk) histDrawCharts();
+  else text(s, FONT_B17, 160, 150, "Mémoire insuffisante", col::AMBER, AL_C);
 }
 
 static void histEnter() {
+  histSprOk = false;
   if (sdOk) histN = indexLoad(hist, HIST_MAX);
   else histN = 0;
   if (histTop >= histN) histTop = 0;
@@ -149,16 +105,22 @@ static void histEnter() {
   else drawHistList();
 }
 
+static void histBack() {
+  histSel = -1;
+  histSprOk = false;
+  spr.deleteSprite();
+  drawHistList();
+}
+
 static void histOpen(int rank) {
-  const TripSummary &s = hist[histN - 1 - rank];
-  tft.fillRect(0, 24, 320, 216, col::BG);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextPadding(0);
-  tft.setTextColor(col::DIM, col::BG);
-  tft.drawString("Analyse...", 160, 120, 4);
+  using namespace pg_trips;
+  const TripSummary &t = hist[histN - 1 - rank];
+  Surf s = scr();
+  clearContent(s);
+  text(s, FONT_B17, 160, 125, "Analyse…", col::SEC, AL_C);
   char path[64];
-  tripPath(s.name, path, sizeof(path));
-  histCur = s;
+  tripPath(t.name, path, sizeof(path));
+  histCur = t;
   if (tripAnalyze(path, histCur, &histSer)) {
     histSel = rank;
     drawHistDetail();
@@ -168,26 +130,48 @@ static void histOpen(int rank) {
   }
 }
 
+// Glissé vertical dans la liste (une ligne tous les ~22 px)
+static void histDrag(int dy) {
+  if (histSel >= 0 || histN <= pg_trips::ROWS) return;
+  histAcc += dy;
+  int old = histTop;
+  while (histAcc <= -22 && histTop < histN - pg_trips::ROWS) { histTop++; histAcc += 22; }
+  while (histAcc >= 22 && histTop > 0) { histTop--; histAcc -= 22; }
+  if (histTop == 0 && histAcc > 0) histAcc = 0;
+  if (histTop >= histN - pg_trips::ROWS && histAcc < 0) histAcc = 0;
+  if (histTop != old) drawHistRows();
+}
+
+// Curseur des courbes : x = position du doigt à l'écran
+static void histCursorAt(int x) {
+  using namespace pg_trips;
+  if (histSel < 0 || !histSprOk) return;
+  int c = x - 5 - CH_X0;
+  const int W = CH_X1 - CH_X0 + 1;
+  if (c < 0) c = 0;
+  if (c > W - 1) c = W - 1;
+  if (c == histCursor) return;
+  histCursor = c;
+  histDrawCharts();
+}
+
 // Retourne true si le toucher a été traité par la page
 static bool histTap(int x, int y) {
+  using namespace pg_trips;
   if (histSel >= 0) {
-    if (y < 64) {  // en-tête : retour à la liste
-      histSel = -1;
-      drawHistList();
-    }
+    if (y < 46) histBack();  // en-tête : retour à la liste
+    else if (y >= CHART_Y[0]) histCursorAt(x);
     return true;
   }
-  if (x >= 268) {
-    if (y < 112 && histTop > 0) {
-      histTop = histTop > HIST_ROWS ? histTop - HIST_ROWS : 0;
-      drawHistList();
-    } else if (y >= 112 && histTop + HIST_ROWS < histN) {
-      histTop += HIST_ROWS;
-      drawHistList();
-    }
+  histAcc = 0;
+  if (x >= 303) {  // barre de défilement : page précédente / suivante
+    int old = histTop;
+    if (y < LIST_Y + ROWS * ROW_H / 2) histTop = histTop > ROWS ? histTop - ROWS : 0;
+    else if (histTop + ROWS < histN) histTop = histTop + ROWS > histN - ROWS ? histN - ROWS : histTop + ROWS;
+    if (histTop != old) drawHistRows();
     return true;
   }
-  int r = (y - 28) / 38;
-  if (y >= 28 && r >= 0 && r < HIST_ROWS && histTop + r < histN) histOpen(histTop + r);
+  int r = (y - LIST_Y) / ROW_H;
+  if (y >= LIST_Y && r >= 0 && r < ROWS && histTop + r < histN) histOpen(histTop + r);
   return true;
 }

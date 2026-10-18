@@ -215,7 +215,7 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
         text(S, FONT_S11, 47 + w + 3, 207, v.turnUnit, col::SEC);
         text(S, FONT_S11, 47, 219, turnWord(v.turnA, b, sizeof(b)), col::ACCENT);
       } else {
-        text(S, FONT_B21, 47, 205, "Tout droit", col::TXT);
+        text(S, FONT_B17, 47, 206, "Tout droit", col::TXT);
         text(S, FONT_M10, 47, 218, "jusqu'au prochain virage", col::SEC);
       }
     }

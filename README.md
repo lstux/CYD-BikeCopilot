@@ -73,6 +73,13 @@ Sans `route.gpx`, la carte s'affiche quand même, centrée sur la position.
 
 La SD est sur le bus VSPI (IO5/18/19/23), l'écran sur HSPI (`-DUSE_HSPI_PORT`).
 
+## Interface, polices et simulateur
+
+L'interface est dessinée par une petite couche graphique maison (`src/dashboard/gfx.h`) au-dessus de TFT_eSPI : cercles, arcs, lignes et polygones anticrénelés, texte en niveaux de gris. Les pages dynamiques (jauge, boussole, carte) sont composées dans un sprite partiel, car la mémoire ne permet pas un tampon plein écran.
+
+- **Polices** : Inter (Bold / SemiBold / Medium), générées en bitmaps par `tools/make_fonts.py` (Pillow) dans `fonts_data.h`. Inter est sous licence SIL OFL 1.1 (https://rsms.me/inter/).
+- **Simulateur** : `tools/sim/build.sh <dossier>` compile les pages sur PC avec de fausses données et écrit des PNG (compteur, direction, carte, trajets, détail, réglages), pratique pour régler la mise en page sans carte.
+
 ## Matériel
 
 - ESP32-2432S028 (ESP32-WROOM-32, écran ILI9341 320×240, lecteur microSD)

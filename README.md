@@ -17,7 +17,7 @@ Bouton BOOT : appui court = page suivante, appui long (> 1 s) = remise à zéro 
 ## Matériel
 
 - ESP32-2432S028 (ESP32-WROOM-32, écran ILI9341 320×240, lecteur microSD)
-- Module GPS (type « Cyclone » AliExpress, trames NMEA 9600 bauds)
+- Module GPS (type « Cyclone » AliExpress, trames NMEA à 38400 bauds)
 - Boussole QMC5883P (`0x2C`, le QMC5883L en `0x0D` est aussi géré)
 
 ### Câblage

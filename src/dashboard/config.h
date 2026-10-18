@@ -20,7 +20,7 @@
 #define COURSE_MIN_KMH   6.0    // au dessus : cap GPS plutôt que boussole
 
 // --- Boussole ---
-#define COMPASS_OFFSET_DEG  0.0 // à ajuster selon l'orientation du module sur la carte
+#define COMPASS_OFFSET_DEG  180.0 // module monté à l'envers : décalage mesuré de 180°
 #define COMPASS_INVERT      0   // 1 si le sens de rotation est inversé
 
 // --- Jauge de vitesse (échelle adaptative) ---

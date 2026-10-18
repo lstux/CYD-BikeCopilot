@@ -13,6 +13,8 @@
 #include "config.h"
 #include "compass.h"
 #include "ui.h"
+#include "page_gauge.h"
+#include "page_compass.h"
 #include "touch.h"
 #include "settings.h"
 #include "trips.h"
@@ -26,14 +28,6 @@ TripLogger logger;
 static bool modalReset = false;  // fenêtre « Remettre à zéro ? » affichée
 Compass compass;
 
-// --- Géométrie (écran 320x240) ---
-// Jauge (page 0) : centre (160,131), sprite x 64..256, y 26..214
-static const int DIAL_CX = 160, DIAL_CY = 131;
-static const int DIAL_X0 = 64, DIAL_Y0 = 26, DIAL_W = 192, DIAL_H = 188;
-// Boussole (page 1) : centre (105,131), sprite x 9..201, y 34..228
-static const int CMP_CX = 105, CMP_CY = 131;
-static const int CMP_X0 = 9, CMP_Y0 = 34, CMP_W = 192, CMP_H = 194;
-
 // --- État du trajet ---
 struct Trip {
   double distM = 0;
@@ -42,6 +36,8 @@ struct Trip {
   bool hasLast = false;
   double lastLat = 0, lastLon = 0;
   uint32_t lastTickMs = 0;
+  float climbM = 0, altRef = 0, altFilt = 0;
+  bool hasAlt = false;
   void reset() { *this = Trip(); }
 } trip;
 
@@ -140,263 +136,172 @@ static void localTime(char *out, size_t n) {
   snprintf(out, n, "%02d:%02d", h, gps.time.minute());
 }
 
-static void drawStatusBar() {
-  char buf[48], t[8];
-  localTime(t, sizeof(t));
-  bool fix = gps.location.isValid() && gps.location.age() < 3000;
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextPadding(230);
-  tft.setTextColor(fix ? col::GREEN : col::ORANGE, col::BG);
-  if (fix)
-    snprintf(buf, sizeof(buf), "GPS %d sat  hdop %.1f", (int)gps.satellites.value(), gps.hdop.hdop());
-  else
-    snprintf(buf, sizeof(buf), "Recherche GPS... %d sat", (int)gps.satellites.value());
-  tft.drawString(buf, 4, 3, 2);
+static gfx::Surf scr() { return gfx::onScreen(tft, col::BG); }
 
-  tft.setTextDatum(TR_DATUM);
-  tft.setTextPadding(60);
-  tft.setTextColor(col::WHITE, col::BG);
-  tft.drawString(t, 316, 3, 2);
-  tft.setTextPadding(0);
-
-  // Enregistrement : point rouge = trajet en cours, gris = départ détecté (pas encore validé)
+static void drawStatusBar(bool force = false) {
+  static char cache[32];
+  hud::Status st;
+  st.sats = (int)gps.satellites.value();
+  st.fix = gps.location.isValid() && gps.location.age() < 3000;
   TripLogger::State ls = logger.state();
-  tft.fillCircle(246, 11, 5, col::BG);
-  if (ls == TripLogger::ACTIVE) tft.fillCircle(246, 11, 4, RGB565(255, 50, 50));
-  else if (ls == TripLogger::PENDING) tft.drawCircle(246, 11, 4, col::DIM);
+  st.rec = ls == TripLogger::ACTIVE ? 2 : (ls == TripLogger::PENDING ? 1 : 0);
+  localTime(st.clock, sizeof(st.clock));
+  char key[32];
+  snprintf(key, sizeof(key), "%d|%d|%d|%s", st.sats, st.fix, st.rec, st.clock);
+  if (!force && strcmp(key, cache) == 0) return;
+  strcpy(cache, key);
+  hud::statusBar(scr(), st);
 }
 
 // =====================================================================
-// Page 0 : jauge
+// Page 0 : compteur (jauge + tuiles)
 // =====================================================================
+static bool glowOn = true;        // halo de l'arc : désactivé si l'image prend trop de temps
+static bool frameForce = true;    // forcer le prochain dessin (changement de page)
+static uint32_t slowFrames = 0;
+
 static void drawDial(int maxKmh, float needle, int shownKmh) {
-  const float cx = DIAL_CX - DIAL_X0, cy = DIAL_CY - DIAL_Y0;
-  const float R_IN = 83.5f, R_OUT = 92.5f;
-  spr.fillSprite(col::BG);
+  static float lastNeedle = -1, lastSeen = -1;
+  static int lastMax = -1, lastShown = -1;
+  if (!frameForce && fabsf(needle - lastNeedle) < 0.12f && maxKmh == lastMax && shownKmh == lastShown &&
+      fabsf(trip.maxKmh - lastSeen) < 0.05f)
+    return;
+  lastNeedle = needle; lastMax = maxKmh; lastShown = shownKmh; lastSeen = trip.maxKmh;
+  frameForce = false;
 
-  // Piste
-  for (int a = -135; a < 135; a += 3) wedge(spr, cx, cy, R_IN, R_OUT, a, a + 3.6f, col::TRACK);
-
-  // Arc de valeur, en dégradé
-  float ratio = needle / (float)maxKmh;
-  if (ratio < 0) ratio = 0;
-  if (ratio > 1) ratio = 1;
-  float aEnd = -135.0f + 270.0f * ratio;
-  for (float a = -135.0f; a < aEnd; a += 3.0f) {
-    float a1 = a + 3.6f;
-    if (a1 > aEnd) a1 = aEnd;
-    wedge(spr, cx, cy, R_IN, R_OUT, a, a1, gradient((a + 136.5f) / 270.0f));
-  }
-
-  // Graduations : une par km/h, plus longues tous les 5
-  for (int i = 0; i <= maxKmh; i++) {
-    float a = -135.0f + 270.0f * i / maxKmh;
-    if (i % 5 == 0) {
-      Pt p0 = polar(cx, cy, 72, a), p1 = polar(cx, cy, 80, a);
-      thickLine(spr, p0.x, p0.y, p1.x, p1.y, 2.2f, col::TICK_MAJOR);
-    } else {
-      Pt p0 = polar(cx, cy, 74.5f, a), p1 = polar(cx, cy, 79.5f, a);
-      spr.drawLine(p0.x, p0.y, p1.x, p1.y, col::TICK);
+  uint32_t t0 = millis();
+  gfx::Surf s = gfx::onSprite(spr, pg_gauge::SX, pg_gauge::SY);
+  pg_gauge::draw(s, maxKmh, needle, shownKmh, trip.maxKmh, glowOn);
+  spr.pushSprite(pg_gauge::SX, pg_gauge::SY);
+  uint32_t dt = millis() - t0;
+  if (dt > 55) {
+    if (++slowFrames >= 8 && glowOn) {
+      glowOn = false;
+      Serial.println("Jauge lente : halo desactive");
     }
+  } else if (slowFrames > 0) {
+    slowFrames--;
   }
-
-  // Chiffres tous les 5 km/h
-  spr.setTextDatum(MC_DATUM);
-  char buf[8];
-  for (int v = 0; v <= maxKmh; v += 5) {
-    float a = -135.0f + 270.0f * v / maxKmh;
-    Pt p = polar(cx, cy, 58, a);
-    spr.setTextColor(v == maxKmh ? col::WHITE : col::LABEL, col::BG);
-    snprintf(buf, sizeof(buf), "%d", v);
-    spr.drawString(buf, p.x, p.y, 2);
+  static uint32_t lastPrint = 0;
+  if (millis() - lastPrint > 3000) {
+    lastPrint = millis();
+    Serial.printf("jauge : %lu ms/image (halo %s)\n", (unsigned long)dt, glowOn ? "oui" : "non");
   }
-
-  // Aiguille (corps large + petite queue), puis moyeu
-  Pt tip = polar(cx, cy, 73, aEnd);
-  Pt bl = polar(cx, cy, 3.5f, aEnd - 90);
-  Pt br = polar(cx, cy, 3.5f, aEnd + 90);
-  Pt tail = polar(cx, cy, 10, aEnd + 180);
-  spr.fillTriangle(tip.x, tip.y, bl.x, bl.y, br.x, br.y, col::NEEDLE);
-  spr.fillTriangle(tail.x, tail.y, bl.x, bl.y, br.x, br.y, col::NEEDLE);
-  spr.fillCircle((int)cx, (int)cy, 8, col::TRACK);
-  spr.drawCircle((int)cx, (int)cy, 8, col::NEEDLE);
-  spr.drawCircle((int)cx, (int)cy, 7, col::NEEDLE);
-  spr.fillCircle((int)cx, (int)cy, 3, col::NEEDLE);
-
-  // Vitesse numérique au centre
-  spr.setTextDatum(MC_DATUM);
-  spr.setTextColor(col::WHITE, col::BG);
-  snprintf(buf, sizeof(buf), "%d", shownKmh);
-  spr.drawString(buf, (int)cx, 166 - DIAL_Y0, 6);
-  spr.setTextColor(col::DIM, col::BG);
-  spr.drawString("km/h", (int)cx, 206 - DIAL_Y0, 2);
-
-  spr.pushSprite(DIAL_X0, DIAL_Y0);
 }
 
-// Bloc de statistique : libellé, valeur, unité. Redessiné seulement si le texte change.
-static char statCache[4][24];
+// Tuiles : valeur redessinée seulement si le texte change
+static char statCache[6][24];
 
-static void drawStat(int slot, bool right, int y, const char *label, const char *value,
-                     const char *unit) {
+static void drawStat(int slot, const char *value, const char *unit, uint16_t color = col::TXT) {
   char key[24];
   snprintf(key, sizeof(key), "%s|%s", value, unit);
   if (strcmp(key, statCache[slot]) == 0) return;
   strncpy(statCache[slot], key, sizeof(statCache[slot]) - 1);
-
-  const int x = right ? 316 : 4;
-  tft.fillRect(right ? 256 : 0, y, 64, 62, col::BG);
-  tft.setTextPadding(0);
-  tft.setTextDatum(right ? TR_DATUM : TL_DATUM);
-  tft.setTextColor(col::DIM, col::BG);
-  tft.drawString(label, x, y, 2);
-  tft.setTextColor(col::WHITE, col::BG);
-  tft.drawString(value, x, y + 16, 4);
-  tft.setTextColor(col::DIM, col::BG);
-  tft.drawString(unit, x, y + 44, 2);
+  pg_gauge::drawTileValue(scr(), slot, value, unit, color);
 }
 
 static void drawStats() {
   char v[16];
   snprintf(v, sizeof(v), "%.1f", trip.distM / 1000.0);
-  drawStat(0, false, 28, "DIST", v, "km");
+  drawStat(0, v, "km");
 
-  uint32_t s = trip.movingMs / 1000;
-  if (s >= 3600)
-    snprintf(v, sizeof(v), "%luh%02lu", (unsigned long)(s / 3600), (unsigned long)((s / 60) % 60));
+  uint32_t sec = trip.movingMs / 1000;
+  if (sec >= 3600)
+    snprintf(v, sizeof(v), "%luh%02lu", (unsigned long)(sec / 3600), (unsigned long)((sec / 60) % 60));
   else
-    snprintf(v, sizeof(v), "%02lu:%02lu", (unsigned long)(s / 60), (unsigned long)(s % 60));
-  drawStat(1, false, 168, "TEMPS", v, "");
+    snprintf(v, sizeof(v), "%02lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
+  drawStat(1, v, sec >= 3600 ? "" : "min");
+
+  snprintf(v, sizeof(v), "%d", (int)(trip.climbM + 0.5f));
+  drawStat(2, v, "m");
 
   float avg = trip.movingMs > 0 ? (trip.distM / 1000.0) / (trip.movingMs / 3600000.0) : 0;
   snprintf(v, sizeof(v), "%.1f", avg);
-  drawStat(2, true, 28, "MOY", v, "km/h");
+  drawStat(3, v, "km/h");
 
   snprintf(v, sizeof(v), "%.1f", trip.maxKmh);
-  drawStat(3, true, 168, "MAX", v, "km/h");
+  drawStat(4, v, "km/h", trip.maxKmh > 0 ? col::TXT : col::SEC);
+
+  if (gps.altitude.isValid()) snprintf(v, sizeof(v), "%d", (int)(gps.altitude.meters() + 0.5));
+  else snprintf(v, sizeof(v), "--");
+  drawStat(5, v, "m");
 }
 
 // =====================================================================
-// Page 1 : boussole + destination
+// Page 1 : direction
 // =====================================================================
-static char destCache[3][24];
+struct DirState {
+  bool fix = false;
+  float heading = 0, bearing = 0, rel = 0;  // rel : -180..180, > 0 = à droite
+  double distM = 0;
+  const char *src = "boussole";
+};
 
-static void drawCompass(float heading, bool haveArrow, float relDeg) {
-  const float cx = CMP_CX - CMP_X0, cy = CMP_CY - CMP_Y0;
-  spr.fillSprite(col::BG);
-
-  // Anneau
-  for (int r = 91; r <= 95; r++) spr.drawCircle((int)cx, (int)cy, r, col::TRACK);
-
-  // Graduations tous les 5 degrés, plus longues tous les 45
-  for (int i = 0; i < 72; i++) {
-    float a = i * 5.0f - heading;
-    if (i % 9 == 0) {
-      Pt p0 = polar(cx, cy, 76, a), p1 = polar(cx, cy, 86, a);
-      thickLine(spr, p0.x, p0.y, p1.x, p1.y, 2.2f, col::TICK_MAJOR);
-    } else {
-      Pt p0 = polar(cx, cy, 81, a), p1 = polar(cx, cy, 86, a);
-      spr.drawLine(p0.x, p0.y, p1.x, p1.y, col::TICK);
-    }
+static DirState dirState() {
+  DirState d;
+  float kmh = currentKmh();
+  d.fix = gps.location.isValid() && gps.location.age() < 3000;
+  if (kmh >= COURSE_MIN_KMH && gps.course.isValid()) {
+    d.heading = gps.course.deg();
+    d.src = "cap GPS";
+  } else if (compass.ok() && compass.calibrated()) {
+    d.heading = compass.heading(COMPASS_OFFSET_DEG, COMPASS_INVERT);
   }
-
-  // Points cardinaux (le haut de l'écran = sens de marche)
-  static const char *names[4] = {"N", "E", "S", "O"};
-  spr.setTextDatum(MC_DATUM);
-  for (int i = 0; i < 4; i++) {
-    Pt p = polar(cx, cy, 64, i * 90.0f - heading);
-    spr.setTextColor(i == 0 ? col::NEEDLE : col::LABEL, col::BG);
-    spr.drawString(names[i], p.x, p.y, 4);
+  if (d.fix) {
+    d.distM = TinyGPSPlus::distanceBetween(gps.location.lat(), gps.location.lng(), destLat, destLon);
+    d.bearing = (float)TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), destLat, destLon);
+    d.rel = pg_compass::norm360(d.bearing - d.heading + 180.0f) - 180.0f;
   }
-
-  // Flèche vers la destination
-  if (haveArrow) {
-    float a = relDeg * (float)M_PI / 180.0f;
-    float ca = cosf(a), sa = sinf(a);
-    const float P[4][2] = {{0, -54}, {-30, 38}, {0, 20}, {30, 38}};  // pointe, gauche, creux, droite
-    int X[4], Y[4];
-    for (int i = 0; i < 4; i++) {
-      X[i] = (int)lroundf(cx + P[i][0] * ca - P[i][1] * sa);
-      Y[i] = (int)lroundf(cy + P[i][0] * sa + P[i][1] * ca);
-    }
-    spr.fillTriangle(X[0], Y[0], X[1], Y[1], X[2], Y[2], col::CYAN);
-    spr.fillTriangle(X[0], Y[0], X[3], Y[3], X[2], Y[2], col::BLUE);
-  }
-
-  spr.pushSprite(CMP_X0, CMP_Y0);
+  return d;
 }
 
-// Texte suivi d'un petit rond (symbole degré, absent des polices)
-static void drawDegText(int x, int y, const char *txt, uint16_t color) {
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(color, col::BG);
-  tft.drawString(txt, x, y, 2);
-  int w = tft.textWidth(txt, 2);
-  tft.drawCircle(x + w + 3, y + 3, 2, color);
+static void distStrings(const DirState &d, char *num, size_t n, const char *&unit) {
+  if (!d.fix) { snprintf(num, n, "--"); unit = ""; }
+  else if (d.distM < 1000) { snprintf(num, n, "%d", (int)d.distM); unit = "m"; }
+  else if (d.distM < 10000) { snprintf(num, n, "%.1f", d.distM / 1000.0); unit = "km"; }
+  else { snprintf(num, n, "%d", (int)(d.distM / 1000.0 + 0.5)); unit = "km"; }
 }
 
-static void drawDestinationInfo(bool fix, double distM, double bearing, float heading,
-                                const char *src, float kmh) {
-  const int X = 209;
-  char num[12], unit[4], l1[24], l2[24], l3[24];
-  if (fix) {
-    if (distM < 1000) {
-      snprintf(num, sizeof(num), "%d", (int)distM);
-      snprintf(unit, sizeof(unit), "m");
-    } else if (distM < 10000) {
-      snprintf(num, sizeof(num), "%.1f", distM / 1000.0);
-      snprintf(unit, sizeof(unit), "km");
-    } else {
-      snprintf(num, sizeof(num), "%d", (int)(distM / 1000.0 + 0.5));
-      snprintf(unit, sizeof(unit), "km");
-    }
-    snprintf(l1, sizeof(l1), "azimut %d", (int)bearing);
-    snprintf(l2, sizeof(l2), "%s %d", src, (int)heading);
-    snprintf(l3, sizeof(l3), "%d km/h", (int)(kmh + 0.5f));
+static void drawCompass() {
+  static float lastH = -999, lastB = -999;
+  static char lastNum[12];
+  DirState d = dirState();
+  char num[12];
+  const char *unit;
+  distStrings(d, num, sizeof(num), unit);
+  if (!frameForce && fabsf(d.heading - lastH) < 0.4f && fabsf(d.bearing - lastB) < 0.4f && strcmp(num, lastNum) == 0)
+    return;
+  lastH = d.heading; lastB = d.bearing; strcpy(lastNum, num);
+  frameForce = false;
+  gfx::Surf s = gfx::onSprite(spr, pg_compass::SX, pg_compass::SY);
+  pg_compass::draw(s, d.heading, d.bearing, d.fix, num, unit);
+  spr.pushSprite(pg_compass::SX, pg_compass::SY);
+}
+
+static char destCache[2][40];
+
+static void drawDirectionTiles() {
+  DirState d = dirState();
+  char v[12], s1[24], s2[24], key[40];
+  snprintf(v, sizeof(v), "%d°", (int)(d.heading + 0.5f) % 360);
+  snprintf(key, sizeof(key), "%s|%s|%s", v, pg_compass::cardinalName(d.heading), d.src);
+  if (strcmp(key, destCache[0]) != 0) {
+    strcpy(destCache[0], key);
+    pg_compass::tileUpdate(scr(), 4, v, col::TXT, pg_compass::cardinalName(d.heading), d.src);
+  }
+  if (d.fix) {
+    snprintf(v, sizeof(v), "%d°", (int)(d.bearing + 0.5f) % 360);
+    snprintf(s2, sizeof(s2), "%s %d°", d.rel >= 0 ? "droite" : "gauche", (int)(fabsf(d.rel) + 0.5f));
+    strcpy(s1, pg_compass::cardinal16(d.bearing));
   } else {
-    snprintf(num, sizeof(num), "--");
-    unit[0] = '\0';
-    snprintf(l1, sizeof(l1), "attente GPS");
-    l2[0] = '\0';
-    l3[0] = '\0';
+    snprintf(v, sizeof(v), "--");
+    s1[0] = '\0';
+    snprintf(s2, sizeof(s2), "attente GPS");
   }
-
-  char k0[24], k1[24], k2[24];
-  snprintf(k0, sizeof(k0), "%s|%s", num, unit);
-  snprintf(k1, sizeof(k1), "%s|%s", l1, l2);
-  snprintf(k2, sizeof(k2), "%s", l3);
-
-  if (strcmp(k0, destCache[0]) != 0) {
-    strncpy(destCache[0], k0, sizeof(destCache[0]) - 1);
-    tft.fillRect(X, 60, 111, 54, col::BG);
-    tft.setTextDatum(TL_DATUM);
-    tft.setTextPadding(0);
-    tft.setTextColor(col::WHITE, col::BG);
-    tft.drawString(num, X, 62, 6);
-    int w = tft.textWidth(num, 6);
-    tft.setTextColor(col::TEXT2, col::BG);
-    tft.drawString(unit, X + w + 4, 84, 4);
-  }
-  if (strcmp(k1, destCache[1]) != 0) {
-    strncpy(destCache[1], k1, sizeof(destCache[1]) - 1);
-    tft.fillRect(X, 124, 111, 40, col::BG);
-    tft.setTextPadding(0);
-    if (fix) {
-      drawDegText(X, 126, l1, col::TEXT2);
-      drawDegText(X, 146, l2, col::TEXT2);
-    } else {
-      tft.setTextDatum(TL_DATUM);
-      tft.setTextColor(col::ORANGE, col::BG);
-      tft.drawString(l1, X, 126, 2);
-    }
-  }
-  if (strcmp(k2, destCache[2]) != 0) {
-    strncpy(destCache[2], k2, sizeof(destCache[2]) - 1);
-    tft.fillRect(X, 170, 111, 30, col::BG);
-    tft.setTextDatum(TL_DATUM);
-    tft.setTextPadding(0);
-    tft.setTextColor(col::WHITE, col::BG);
-    tft.drawString(l3, X, 172, 4);
+  snprintf(key, sizeof(key), "%s|%s|%s", v, s1, s2);
+  if (strcmp(key, destCache[1]) != 0) {
+    strcpy(destCache[1], key);
+    pg_compass::tileUpdate(scr(), 251, v, d.fix ? col::ACCENT : col::SEC, s1, s2);
   }
 }
 
@@ -420,6 +325,13 @@ static void updateTrip() {
       }
       trip.movingMs += dt;
       if (kmh > trip.maxKmh) trip.maxKmh = kmh;
+      if (gps.altitude.isValid()) {  // dénivelé positif : lissage + hystérésis de 3 m
+        float alt = (float)gps.altitude.meters();
+        if (!trip.hasAlt) { trip.hasAlt = true; trip.altFilt = trip.altRef = alt; }
+        trip.altFilt += (alt - trip.altFilt) * 0.2f;
+        if (trip.altFilt - trip.altRef >= 3.0f) { trip.climbM += trip.altFilt - trip.altRef; trip.altRef = trip.altFilt; }
+        else if (trip.altFilt < trip.altRef) trip.altRef = trip.altFilt;
+      }
     }
   } else {
     trip.lastLat = lat;
@@ -624,11 +536,11 @@ static void handleButton() {
 static void enterPage() {
   modalReset = false;
   tft.fillScreen(col::BG);
-  tft.fillRect(0, 22, 320, 2, col::RULE);
+  frameForce = true;
   if (page == 0) {
-    sprOk = makeSprite(DIAL_W, DIAL_H);
+    sprOk = makeSprite(pg_gauge::SW, pg_gauge::SH);
   } else if (page == 1) {
-    sprOk = makeSprite(CMP_W, CMP_H);
+    sprOk = makeSprite(pg_compass::SW, pg_compass::SH);
   } else if (page == 2) {
     spr.deleteSprite();
     band.deleteSprite();
@@ -643,13 +555,13 @@ static void enterPage() {
   memset(statCache, 0, sizeof(statCache));
   memset(destCache, 0, sizeof(destCache));
 
+  drawStatusBar(true);
+  if (page == 0) pg_gauge::drawTileFrames(scr());
   if (page == 1) {
-    tft.fillTriangle(CMP_CX - 5, 24, CMP_CX + 5, 24, CMP_CX, 33, col::WHITE);
-    tft.setTextDatum(TL_DATUM);
-    tft.setTextPadding(0);
-    tft.setTextColor(col::DIM, col::BG);
-    tft.drawString("DESTINATION", 209, 40, 2);
+    pg_compass::tile(scr(), 4, "CAP", "", col::TXT, "", "");
+    pg_compass::tile(scr(), 251, "DEST.", "", col::ACCENT, "", "");
   }
+  if (page <= 1) hud::pageDots(scr(), page, NB_PAGES);
   if (page == 3) histEnter();
   if (page == 4) settingsEnter();
   if (!sprOk && page < 3) {
@@ -676,43 +588,14 @@ static void renderFrame(uint32_t now) {
     if (fabsf(kmh - needleKmh) < 0.05f) needleKmh = kmh;
     drawDial(gaugeMax, needleKmh, (int)(kmh + 0.5f));
   } else {
-    bool fix = gps.location.isValid() && gps.location.age() < 3000;
-    float heading = 0;
-    if (kmh >= COURSE_MIN_KMH && gps.course.isValid())
-      heading = gps.course.deg();
-    else if (compass.ok() && compass.calibrated())
-      heading = compass.heading(COMPASS_OFFSET_DEG, COMPASS_INVERT);
-
-    double bearing = 0;
-    if (fix) bearing = TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), destLat, destLon);
-    drawCompass(heading, fix, (float)bearing - heading);
+    drawCompass();
   }
 }
 
 static void renderSlow() {
   drawStatusBar();
-  float kmh = currentKmh();
-
-  if (page == 0) {
-    drawStats();
-  } else if (page == 1) {
-    bool fix = gps.location.isValid() && gps.location.age() < 3000;
-    double dist = 0, bearing = 0;
-    if (fix) {
-      dist = TinyGPSPlus::distanceBetween(gps.location.lat(), gps.location.lng(), destLat, destLon);
-      bearing = TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), destLat, destLon);
-    }
-    float heading = 0;
-    const char *src = "cap";
-    if (kmh >= COURSE_MIN_KMH && gps.course.isValid()) {
-      heading = gps.course.deg();
-      src = "cap GPS";
-    } else if (compass.ok() && compass.calibrated()) {
-      heading = compass.heading(COMPASS_OFFSET_DEG, COMPASS_INVERT);
-      src = "boussole";
-    }
-    drawDestinationInfo(fix, dist, bearing, heading, src, kmh);
-  }
+  if (page == 0) drawStats();
+  else if (page == 1) drawDirectionTiles();
 }
 
 void setup() {

@@ -1,41 +1,7 @@
 #pragma once
-// Couleurs et primitives de dessin communes (jauge, boussole).
-// Les angles sont en degrés, 0 = haut, sens horaire.
-#include <Arduino.h>
+// Anciennes primitives de dessin (sans anti-crénelage), encore utilisées par la page carte.
 #include <TFT_eSPI.h>
-#include <math.h>
-
-#define RGB565(r, g, b) \
-  ((uint16_t)(((((int)(r)) & 0xF8) << 8) | ((((int)(g)) & 0xFC) << 3) | ((((int)(b)) & 0xFF) >> 3)))
-
-namespace col {
-static const uint16_t BG = RGB565(5, 7, 10);
-static const uint16_t RULE = RGB565(35, 42, 49);
-static const uint16_t TRACK = RGB565(22, 27, 34);
-static const uint16_t TICK = RGB565(75, 83, 92);
-static const uint16_t TICK_MAJOR = RGB565(196, 203, 211);
-static const uint16_t LABEL = RGB565(154, 163, 173);
-static const uint16_t DIM = RGB565(123, 135, 148);
-static const uint16_t TEXT2 = RGB565(184, 192, 200);
-static const uint16_t WHITE = 0xFFFF;
-static const uint16_t NEEDLE = RGB565(255, 77, 46);
-static const uint16_t GREEN = RGB565(47, 224, 90);
-static const uint16_t ORANGE = RGB565(255, 176, 32);
-static const uint16_t CYAN = RGB565(0, 229, 255);
-static const uint16_t BLUE = RGB565(42, 107, 255);
-}  // namespace col
-
-struct Pt {
-  int16_t x, y;
-};
-
-static inline Pt polar(float cx, float cy, float r, float deg) {
-  float a = deg * (float)M_PI / 180.0f;
-  Pt p;
-  p.x = (int16_t)lroundf(cx + r * sinf(a));
-  p.y = (int16_t)lroundf(cy - r * cosf(a));
-  return p;
-}
+#include "theme.h"
 
 static inline void fillQuad(TFT_eSPI &g, Pt a, Pt b, Pt c, Pt d, uint16_t color) {
   g.fillTriangle(a.x, a.y, b.x, b.y, c.x, c.y, color);

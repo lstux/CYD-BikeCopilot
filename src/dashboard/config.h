@@ -15,7 +15,17 @@
 #define DEST_LON     2.294481
 
 // --- Trajet ---
-#define MOVING_MIN_KMH   3.0    // en dessous : considéré à l'arrêt
+// Filtrage de la vitesse (le GPS « dérive » à l'arrêt et annonce 2-4 km/h)
+#ifndef SPEED_START_KMH
+#define SPEED_START_KMH  5.0    // au dessus (pendant SPEED_START_MS) : on passe « en mouvement »
+#endif
+#ifndef SPEED_STOP_KMH
+#define SPEED_STOP_KMH   3.0    // en dessous : retour « à l'arrêt » (vitesse affichée = 0)
+#endif
+#define SPEED_START_MS   2000   // durée au dessus du seuil de départ
+#define SPEED_HDOP_MAX   3.0    // pour démarrer : précision GPS suffisante (HDOP)
+#define SPEED_MIN_SATS   4      // pour démarrer : nombre de satellites minimum
+#define SPEED_TAU_MS     700    // lissage de la vitesse en mouvement
 #define MIN_STEP_M       2.0    // ignore les micro-déplacements (bruit GPS)
 #define COURSE_MIN_KMH   6.0    // au dessus : cap GPS plutôt que boussole
 

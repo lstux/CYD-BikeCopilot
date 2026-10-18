@@ -14,6 +14,10 @@ Compteur / tableau de bord de vélo sur une carte **ESP32-2432S028 (« Cheap Yel
 
 Bouton BOOT : appui court = page suivante, appui long (> 1 s) = remise à zéro du trajet (sur la page carte : changement de zoom 15 / 16 / 17).
 
+### Filtrage de la vitesse
+
+À l'arrêt, le GPS dérive et annonce parfois 2 à 4 km/h. La vitesse est donc mise à 0 tant qu'on n'a pas dépassé 5 km/h pendant 2 s avec un signal correct (≥ 4 satellites, HDOP ≤ 3) ; on repasse à l'arrêt sous 3 km/h. En mouvement, un lissage léger (~0,7 s) calme l'aiguille. La distance, le temps roulant et le max n'utilisent que cette vitesse filtrée. Réglages `SPEED_*` dans `config.h` ; l'environnement `dashboard-walk` utilise des seuils plus bas (2 / 1,2 km/h) pour la marche.
+
 ### Échelle de la jauge
 
 L'échelle part de 15 km/h. Dès que la vitesse la dépasse, elle passe au palier de 5 au-dessus (20, 25, 30…). Elle ne redescend d'un cran qu'après 8 s nettement sous le palier inférieur (moins de 80 % de sa valeur), pour éviter les sauts. Réglages dans `src/dashboard/config.h` (`GAUGE_*`). Pour tester à pied : `pio run -e dashboard-walk -t upload` (la jauge démarre à 5 km/h).

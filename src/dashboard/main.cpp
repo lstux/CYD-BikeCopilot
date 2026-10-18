@@ -53,6 +53,37 @@ static void pollGps() {
 
 #include "mappage.h"
 
+// --- Vitesse filtrée (anti-dérive GPS à l'arrêt) ---
+static float speedKmh = 0;
+static bool speedMoving = false;
+static uint32_t speedAboveSince = 0, speedLastMs = 0;
+
+static void updateSpeed(uint32_t now) {
+  float raw = (gps.speed.isValid() && gps.speed.age() < 3000) ? gps.speed.kmph() : 0;
+  if (!speedMoving) {
+    bool good = gps.location.isValid() && gps.satellites.value() >= SPEED_MIN_SATS &&
+                gps.hdop.isValid() && gps.hdop.hdop() <= SPEED_HDOP_MAX;
+    if (good && raw >= SPEED_START_KMH) {
+      if (speedAboveSince == 0) speedAboveSince = now;
+      if (now - speedAboveSince >= SPEED_START_MS) {
+        speedMoving = true;
+        speedKmh = raw;
+      }
+    } else {
+      speedAboveSince = 0;
+    }
+    if (!speedMoving) speedKmh = 0;
+  } else if (raw < SPEED_STOP_KMH) {
+    speedMoving = false;
+    speedAboveSince = 0;
+    speedKmh = 0;
+  } else {
+    float alpha = 1.0f - expf(-(float)(now - speedLastMs) / SPEED_TAU_MS);
+    speedKmh += alpha * (raw - speedKmh);
+  }
+  speedLastMs = now;
+}
+
 // --- Échelle adaptative de la jauge ---
 static int gaugeMax = GAUGE_MIN_MAX;
 static uint32_t belowSince = 0;
@@ -359,12 +390,12 @@ static void drawDestinationInfo(bool fix, double distM, double bearing, float he
 static void updateTrip() {
   if (!(gps.location.isValid() && gps.location.isUpdated())) return;
   uint32_t now = millis();
-  float kmh = gps.speed.isValid() ? gps.speed.kmph() : 0;
+  float kmh = speedKmh;
   double lat = gps.location.lat(), lon = gps.location.lng();
 
   if (trip.hasLast) {
     uint32_t dt = now - trip.lastTickMs;
-    if (kmh >= MOVING_MIN_KMH) {
+    if (speedMoving) {
       double d = TinyGPSPlus::distanceBetween(trip.lastLat, trip.lastLon, lat, lon);
       if (d >= MIN_STEP_M) {
         trip.distM += d;
@@ -447,8 +478,7 @@ static void enterPage() {
 }
 
 static float currentKmh() {
-  float kmh = gps.speed.isValid() ? gps.speed.kmph() : 0;
-  return kmh < 1.0f ? 0 : kmh;
+  return speedKmh;
 }
 
 static void renderFrame(uint32_t now) {
@@ -537,6 +567,7 @@ void loop() {
   static uint32_t lastFrame = 0, lastSlow = 0, lastCompass = 0;
 
   while (Serial2.available()) gps.encode(Serial2.read());
+  updateSpeed(millis());
   updateTrip();
   if (compass.ok() && millis() - lastCompass >= 20) {  // 50 Hz max
     lastCompass = millis();

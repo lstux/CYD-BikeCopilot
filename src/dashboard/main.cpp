@@ -13,10 +13,13 @@
 #include "config.h"
 #include "compass.h"
 #include "ui.h"
+#include "touch.h"
 
 TFT_eSPI tft;
 TFT_eSprite spr(&tft);
 TinyGPSPlus gps;
+Touch touch;
+static bool modalReset = false;  // fenêtre « Remettre à zéro ? » affichée
 Compass compass;
 
 // --- Géométrie (écran 320x240) ---
@@ -416,6 +419,129 @@ static void updateTrip() {
 // =====================================================================
 // Bouton BOOT
 // =====================================================================
+static void resetAll() {
+  trip.reset();
+  compass.resetCalibration();
+  gaugeMax = GAUGE_MIN_MAX;
+  memset(statCache, 0, sizeof(statCache));
+}
+
+// --- Calibration du tactile : trois croix à toucher ---
+static void drawCross(int x, int y, uint16_t c) {
+  tft.drawLine(x - 12, y, x + 12, y, c);
+  tft.drawLine(x, y - 12, x, y + 12, c);
+  tft.drawCircle(x, y, 6, c);
+}
+
+static bool waitPress(int &rx, int &ry) {
+  int a, b;
+  while (!touch.readRaw(a, b)) {
+    pollGps();
+    delay(10);
+  }
+  long sx = 0, sy = 0;
+  int n = 0;
+  uint32_t t = millis();
+  while (millis() - t < 350) {
+    if (touch.readRaw(a, b)) {
+      sx += a;
+      sy += b;
+      n++;
+    }
+    pollGps();
+    delay(5);
+  }
+  while (touch.readRaw(a, b)) {
+    pollGps();
+    delay(10);
+  }
+  delay(150);
+  if (n == 0) return false;
+  rx = sx / n;
+  ry = sy / n;
+  return true;
+}
+
+static void touchCalibrate() {
+  const int M = 20;
+  const int px[3] = {M, 320 - M, 320 - M};
+  const int py[3] = {M, M, 240 - M};
+  int rx[3], ry[3];
+  tft.fillScreen(col::BG);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextPadding(0);
+  tft.setTextColor(col::WHITE, col::BG);
+  tft.drawString("Calibration tactile", 160, 100, 4);
+  tft.setTextColor(col::DIM, col::BG);
+  tft.drawString("Touchez les croix", 160, 135, 2);
+  for (int i = 0; i < 3; i++) {
+    drawCross(px[i], py[i], col::ORANGE);
+    while (!waitPress(rx[i], ry[i])) {
+    }
+    drawCross(px[i], py[i], col::BG);
+  }
+  touch.calibrate(rx[0], ry[0], rx[1], ry[1], rx[2], ry[2], M);
+  Serial.printf("Tactile calibré : (%d,%d) (%d,%d) (%d,%d)\n", rx[0], ry[0], rx[1], ry[1], rx[2], ry[2]);
+  pageDirty = true;
+}
+
+static void drawResetModal() {
+  tft.fillRoundRect(30, 70, 260, 110, 10, col::TRACK);
+  tft.drawRoundRect(30, 70, 260, 110, 10, col::TICK_MAJOR);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextPadding(0);
+  tft.setTextColor(col::WHITE, col::TRACK);
+  tft.drawString("Remettre a zero ?", 160, 95, 4);
+  tft.fillRoundRect(45, 125, 110, 40, 6, col::BG);
+  tft.setTextColor(col::WHITE, col::BG);
+  tft.drawString("Annuler", 100, 145, 2);
+  tft.fillRoundRect(165, 125, 110, 40, 6, col::ORANGE);
+  tft.setTextColor(col::BG, col::ORANGE);
+  tft.drawString("Remettre", 220, 145, 2);
+}
+
+static void handleTouch() {
+  TouchEvent e = touch.poll(millis());
+  if (e == TE_NONE) return;
+  if (modalReset) {
+    if (e == TE_TAP && touch.y >= 120 && touch.y <= 170) {
+      if (touch.x >= 165 && touch.x <= 275) {
+        resetAll();
+        modalReset = false;
+        pageDirty = true;
+      } else if (touch.x >= 45 && touch.x < 165) {
+        modalReset = false;
+        pageDirty = true;
+      }
+    }
+    return;
+  }
+  switch (e) {
+    case TE_SWIPE_L:
+      page = (page + 1) % NB_PAGES;
+      pageDirty = true;
+      break;
+    case TE_SWIPE_R:
+      page = (page + NB_PAGES - 1) % NB_PAGES;
+      pageDirty = true;
+      break;
+    case TE_TAP:
+      if (page == 2) {
+        if (touch.x < 110) mapZoomStep(-1);
+        else if (touch.x > 210) mapZoomStep(+1);
+      }
+      break;
+    case TE_LONG:
+      if (page != 2) {
+        modalReset = true;
+        drawResetModal();
+      }
+      break;
+    default:
+      break;
+  }
+}
+
 static void handleButton() {
   static bool down = false;
   static uint32_t downMs = 0;
@@ -426,14 +552,13 @@ static void handleButton() {
   } else if (!pressed && down) {
     down = false;
     uint32_t held = millis() - downMs;
-    if (held > 1000) {
+    if (held > 4000) {
+      touchCalibrate();  // appui très long : recalibrer le tactile
+    } else if (held > 1000) {
       if (page == 2) {
         mapCycleZoom();  // sur la carte : appui long = changer de zoom
       } else {
-        trip.reset();
-        compass.resetCalibration();
-        gaugeMax = GAUGE_MIN_MAX;
-        memset(statCache, 0, sizeof(statCache));
+        resetAll();
       }
     } else if (held > 30) {
       page = (page + 1) % NB_PAGES;
@@ -446,6 +571,7 @@ static void handleButton() {
 // Pages
 // =====================================================================
 static void enterPage() {
+  modalReset = false;
   tft.fillScreen(col::BG);
   tft.fillRect(0, 22, 320, 2, col::RULE);
   if (page == 0) {
@@ -561,6 +687,9 @@ void setup() {
   tft.setTextColor(col::WHITE, col::BG);
   tft.drawString(c ? "Boussole OK" : "Boussole absente", 10, 10, 2);
   delay(800);
+
+  touch.begin(TOUCH_CLK_PIN, TOUCH_MOSI_PIN, TOUCH_MISO_PIN, TOUCH_CS_PIN, TOUCH_IRQ_PIN, 320, 240);
+  if (!touch.calibrated()) touchCalibrate();
 }
 
 void loop() {
@@ -574,12 +703,14 @@ void loop() {
     compass.update();
   }
   handleButton();
+  handleTouch();
 
   uint32_t now = millis();
   if (pageDirty) {
     enterPage();
     renderSlow();
   }
+  if (modalReset) return;  // fenêtre de confirmation : on ne redessine pas dessous
   if (now - lastFrame >= 40) {  // ~25 images/s
     lastFrame = now;
     renderFrame(now);

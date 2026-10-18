@@ -47,3 +47,10 @@
 #define SD_MISO_PIN   19
 #define SD_MOSI_PIN   23
 #define GPX_PATH      "/route.gpx"   // trace à suivre (dernier point = destination)
+
+// Écran tactile XPT2046 (SPI logiciel)
+#define TOUCH_CLK_PIN   25
+#define TOUCH_MOSI_PIN  32
+#define TOUCH_MISO_PIN  39
+#define TOUCH_CS_PIN    33
+#define TOUCH_IRQ_PIN   36

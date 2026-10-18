@@ -204,6 +204,16 @@ static void mapCycleZoom() {
   mapForce = true;
 }
 
+static void mapZoomStep(int d) {
+  int n = mapZoomIdx + d;
+  if (n < 0) n = 0;
+  if (n > 2) n = 2;
+  if (n != mapZoomIdx) {
+    mapZoomIdx = n;
+    mapForce = true;
+  }
+}
+
 static void mapEnter() {
   mapForce = true;
   noFixShown = false;

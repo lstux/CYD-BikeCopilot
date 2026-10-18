@@ -12,6 +12,14 @@ Compteur / tableau de bord de vélo sur une carte **ESP32-2432S028 (« Cheap Yel
 | 2. Direction | boussole tournante (haut = sens de marche), flèche vers la destination, distance à vol d'oiseau | codée |
 | 3. Carte | tuiles OSM depuis la carte SD, centrée sur la position, trace GPX, prochain virage, distance restante | codée, non testée |
 
+### Tactile
+
+- **Glisser** gauche / droite : page suivante / précédente.
+- **Page carte** : toucher le tiers gauche = dézoomer, le tiers droit = zoomer.
+- **Pages compteur et direction** : appui long (~1 s) = fenêtre « Remettre à zéro ? » (confirmation).
+- **Calibration** : automatique au premier démarrage (toucher 3 croix : haut-gauche, haut-droite, bas-droite), mémorisée. Pour recommencer : appui de plus de 4 s sur BOOT.
+- Le tactile (XPT2046, IO25/32/39/33/36) est lu en SPI logiciel, car l'écran et la SD occupent déjà les deux bus matériels.
+
 Bouton BOOT : appui court = page suivante, appui long (> 1 s) = remise à zéro du trajet (sur la page carte : changement de zoom 15 / 16 / 17).
 
 ### Filtrage de la vitesse

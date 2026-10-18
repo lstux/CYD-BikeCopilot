@@ -2,7 +2,7 @@
 
 Compteur / tableau de bord de vélo sur une carte **ESP32-2432S028 (« Cheap Yellow Display »)** avec un module GPS et une boussole QMC5883.
 
-> État : prototype. Le câblage (GPS, I2C, boussole) est validé sur le matériel. La nouvelle interface (jauge, boussole tournante) est écrite mais pas encore testée à l'écran.
+> État : prototype. Le câblage (GPS, I2C, boussole) est validé sur le matériel. La jauge et la boussole fonctionnent ; la page carte (SD, tuiles, trace GPX) est écrite mais pas encore testée sur le matériel.
 
 ## Fonctions
 
@@ -10,13 +10,37 @@ Compteur / tableau de bord de vélo sur une carte **ESP32-2432S028 (« Cheap Yel
 |---|---|---|
 | 1. Compteur | jauge de vitesse à échelle adaptative, distance, temps roulant, moyenne, max, heure | codée |
 | 2. Direction | boussole tournante (haut = sens de marche), flèche vers la destination, distance à vol d'oiseau | codée |
-| 3. Carte | tuiles OSM depuis la carte SD, trace GPX, prochain virage | à faire |
+| 3. Carte | tuiles OSM depuis la carte SD, centrée sur la position, trace GPX, prochain virage, distance restante | codée, non testée |
 
-Bouton BOOT : appui court = page suivante, appui long (> 1 s) = remise à zéro du trajet.
+Bouton BOOT : appui court = page suivante, appui long (> 1 s) = remise à zéro du trajet (sur la page carte : changement de zoom 15 / 16 / 17).
 
 ### Échelle de la jauge
 
 L'échelle part de 15 km/h. Dès que la vitesse la dépasse, elle passe au palier de 5 au-dessus (20, 25, 30…). Elle ne redescend d'un cran qu'après 8 s nettement sous le palier inférieur (moins de 80 % de sa valeur), pour éviter les sauts. Réglages dans `src/dashboard/config.h` (`GAUGE_*`).
+
+## Page carte : préparer la carte SD
+
+La carte microSD (FAT32) contient :
+
+```
+/tiles/<zoom>/<x>/<y>.raw   tuiles 256×256 en RGB565 (131072 octets), zooms 15, 16, 17
+/route.gpx                  trace à suivre (optionnelle) ; son dernier point devient la destination
+```
+
+Le script `tools/make_tiles.py` (Python + Pillow) produit ce dossier :
+
+```
+pip install pillow
+python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/
+# ou une zone : --bbox LAT1 LON1 LAT2 LON2
+# ou convertir des tuiles PNG déjà téléchargées : --png-dir dossier_png
+```
+
+Puis copier le contenu de `sd/` à la racine de la carte. `--dry-run` compte les tuiles sans rien faire.
+Le téléchargement est plafonné (`--max-tiles`) : la [politique des serveurs OSM](https://operations.osmfoundation.org/policies/tiles/) interdit le téléchargement massif ; pour une grande zone, utiliser un autre fournisseur ou `--png-dir`.
+Sans `route.gpx`, la carte s'affiche quand même, centrée sur la position, avec la destination de `config.h`.
+
+La SD est sur le bus VSPI (IO5/18/19/23), l'écran sur HSPI (`-DUSE_HSPI_PORT`).
 
 ## Matériel
 

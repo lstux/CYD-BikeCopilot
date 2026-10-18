@@ -41,6 +41,17 @@ struct Trip {
 int page = 0;
 bool pageDirty = true;
 bool sprOk = false;
+static const int NB_PAGES = 3;
+
+// Destination : dernier point de la trace GPX si elle existe, sinon celle de config.h
+double destLat = DEST_LAT, destLon = DEST_LON;
+
+static float currentKmh();
+static void pollGps() {
+  while (Serial2.available()) gps.encode(Serial2.read());
+}
+
+#include "mappage.h"
 
 // --- Échelle adaptative de la jauge ---
 static int gaugeMax = GAUGE_MIN_MAX;
@@ -70,6 +81,7 @@ static void updateGaugeScale(float kmh, uint32_t now) {
 
 // --- Sprite : 16 bits, sinon 8 bits si la mémoire manque ---
 static bool makeSprite(int w, int h) {
+  band.deleteSprite();
   spr.deleteSprite();
   spr.setColorDepth(16);
   if (spr.createSprite(w, h) != nullptr) return true;
@@ -384,12 +396,16 @@ static void handleButton() {
     down = false;
     uint32_t held = millis() - downMs;
     if (held > 1000) {
-      trip.reset();
-      compass.resetCalibration();
-      gaugeMax = GAUGE_MIN_MAX;
-      memset(statCache, 0, sizeof(statCache));
+      if (page == 2) {
+        mapCycleZoom();  // sur la carte : appui long = changer de zoom
+      } else {
+        trip.reset();
+        compass.resetCalibration();
+        gaugeMax = GAUGE_MIN_MAX;
+        memset(statCache, 0, sizeof(statCache));
+      }
     } else if (held > 30) {
-      page = (page + 1) % 2;
+      page = (page + 1) % NB_PAGES;
       pageDirty = true;
     }
   }
@@ -401,7 +417,17 @@ static void handleButton() {
 static void enterPage() {
   tft.fillScreen(col::BG);
   tft.fillRect(0, 22, 320, 2, col::RULE);
-  sprOk = (page == 0) ? makeSprite(DIAL_W, DIAL_H) : makeSprite(CMP_W, CMP_H);
+  if (page == 0) {
+    sprOk = makeSprite(DIAL_W, DIAL_H);
+  } else if (page == 1) {
+    sprOk = makeSprite(CMP_W, CMP_H);
+  } else {
+    spr.deleteSprite();
+    band.deleteSprite();
+    band.setColorDepth(16);
+    sprOk = band.createSprite(320, BAND_H) != nullptr;
+    mapEnter();
+  }
   memset(statCache, 0, sizeof(statCache));
   memset(destCache, 0, sizeof(destCache));
 
@@ -429,7 +455,9 @@ static void renderFrame(uint32_t now) {
   if (!sprOk) return;
   float kmh = currentKmh();
 
-  if (page == 0) {
+  if (page == 2) {
+    renderMapPage(now);
+  } else if (page == 0) {
     updateGaugeScale(kmh, now);
     needleKmh += (kmh - needleKmh) * 0.3f;  // lissage de l'aiguille
     if (fabsf(kmh - needleKmh) < 0.05f) needleKmh = kmh;
@@ -443,7 +471,7 @@ static void renderFrame(uint32_t now) {
       heading = compass.heading(COMPASS_OFFSET_DEG, COMPASS_INVERT);
 
     double bearing = 0;
-    if (fix) bearing = TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), DEST_LAT, DEST_LON);
+    if (fix) bearing = TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), destLat, destLon);
     drawCompass(heading, fix, (float)bearing - heading);
   }
 }
@@ -454,12 +482,12 @@ static void renderSlow() {
 
   if (page == 0) {
     drawStats();
-  } else {
+  } else if (page == 1) {
     bool fix = gps.location.isValid() && gps.location.age() < 3000;
     double dist = 0, bearing = 0;
     if (fix) {
-      dist = TinyGPSPlus::distanceBetween(gps.location.lat(), gps.location.lng(), DEST_LAT, DEST_LON);
-      bearing = TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), DEST_LAT, DEST_LON);
+      dist = TinyGPSPlus::distanceBetween(gps.location.lat(), gps.location.lng(), destLat, destLon);
+      bearing = TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), destLat, destLon);
     }
     float heading = 0;
     const char *src = "cap";
@@ -482,8 +510,18 @@ void setup() {
   tft.setRotation(1);  // paysage 320x240
   tft.fillScreen(col::BG);
 
-  Serial2.setRxBufferSize(1024);  // marge pendant les redessins de l'écran
+  Serial2.setRxBufferSize(4096);  // marge pendant les redessins de la carte (~1 s de trames)
   Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, -1);
+
+  // Carte SD (bus VSPI ; l'écran est sur HSPI, voir USE_HSPI_PORT dans platformio.ini)
+  sdSPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+  sdOk = SD.begin(SD_CS_PIN, sdSPI, 20000000, "/sd", 8);
+  Serial.printf("Carte SD : %s\n", sdOk ? "OK" : "absente");
+  if (sdOk && track.load(GPX_PATH)) {
+    destLat = track.destLat();
+    destLon = track.destLon();
+    Serial.printf("Trace GPX : %d points, %.1f km\n", track.count(), track.totalM() / 1000.0f);
+  }
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   Wire.setClock(100000);
   bool c = compass.begin();

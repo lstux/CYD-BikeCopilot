@@ -28,3 +28,10 @@
 #define GAUGE_STEP        5     // pas entre deux paliers
 #define GAUGE_DOWN_MS     8000  // durée sous le palier inférieur avant de redescendre d'un cran
 #define GAUGE_DOWN_RATIO  0.8   // "nettement sous" = moins de 80 % du palier inférieur
+
+// --- Carte SD et carte routière ---
+#define SD_CS_PIN     5
+#define SD_SCK_PIN    18
+#define SD_MISO_PIN   19
+#define SD_MOSI_PIN   23
+#define GPX_PATH      "/route.gpx"   // trace à suivre (dernier point = destination)

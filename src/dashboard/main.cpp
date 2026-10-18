@@ -14,11 +14,15 @@
 #include "compass.h"
 #include "ui.h"
 #include "touch.h"
+#include "settings.h"
+#include "trips.h"
 
 TFT_eSPI tft;
 TFT_eSprite spr(&tft);
 TinyGPSPlus gps;
 Touch touch;
+Settings cfg;
+TripLogger logger;
 static bool modalReset = false;  // fenêtre « Remettre à zéro ? » affichée
 Compass compass;
 
@@ -44,7 +48,7 @@ struct Trip {
 int page = 0;
 bool pageDirty = true;
 bool sprOk = false;
-static const int NB_PAGES = 3;
+static const int NB_PAGES = 5;  // 0 compteur, 1 direction, 2 carte, 3 trajets, 4 réglages
 
 // Destination : dernier point de la trace GPX si elle existe, sinon celle de config.h
 double destLat = DEST_LAT, destLon = DEST_LON;
@@ -55,6 +59,8 @@ static void pollGps() {
 }
 
 #include "mappage.h"
+#include "histpage.h"
+#include "settingspage.h"
 
 // --- Vitesse filtrée (anti-dérive GPS à l'arrêt) ---
 static float speedKmh = 0;
@@ -88,20 +94,21 @@ static void updateSpeed(uint32_t now) {
 }
 
 // --- Échelle adaptative de la jauge ---
-static int gaugeMax = GAUGE_MIN_MAX;
+static int gaugeMax = GAUGE_MIN_MAX;  // ajusté dans setup() d'après les réglages
 static uint32_t belowSince = 0;
 static float needleKmh = 0;
 
 static void updateGaugeScale(float kmh, uint32_t now) {
+  if (gaugeMax < cfg.gaugeMin) gaugeMax = cfg.gaugeMin;
   if (kmh > gaugeMax) {
     // Montée immédiate au palier juste au-dessus
     int m = ((int)ceilf(kmh / GAUGE_STEP)) * GAUGE_STEP;
-    gaugeMax = m < GAUGE_MIN_MAX ? GAUGE_MIN_MAX : m;
+    gaugeMax = m < cfg.gaugeMin ? cfg.gaugeMin : m;
     belowSince = 0;
     return;
   }
   // Descente d'un cran seulement après un moment nettement sous le palier inférieur
-  if (gaugeMax > GAUGE_MIN_MAX && kmh < (gaugeMax - GAUGE_STEP) * GAUGE_DOWN_RATIO) {
+  if (gaugeMax > cfg.gaugeMin && kmh < (gaugeMax - GAUGE_STEP) * GAUGE_DOWN_RATIO) {
     if (belowSince == 0) {
       belowSince = now;
     } else if (now - belowSince >= GAUGE_DOWN_MS) {
@@ -129,7 +136,7 @@ static void localTime(char *out, size_t n) {
     snprintf(out, n, "--:--");
     return;
   }
-  int h = (gps.time.hour() + TZ_OFFSET_H + 24) % 24;
+  int h = (gps.time.hour() + cfg.tz + 24) % 24;
   snprintf(out, n, "%02d:%02d", h, gps.time.minute());
 }
 
@@ -151,6 +158,12 @@ static void drawStatusBar() {
   tft.setTextColor(col::WHITE, col::BG);
   tft.drawString(t, 316, 3, 2);
   tft.setTextPadding(0);
+
+  // Enregistrement : point rouge = trajet en cours, gris = départ détecté (pas encore validé)
+  TripLogger::State ls = logger.state();
+  tft.fillCircle(246, 11, 5, col::BG);
+  if (ls == TripLogger::ACTIVE) tft.fillCircle(246, 11, 4, RGB565(255, 50, 50));
+  else if (ls == TripLogger::PENDING) tft.drawCircle(246, 11, 4, col::DIM);
 }
 
 // =====================================================================
@@ -422,7 +435,7 @@ static void updateTrip() {
 static void resetAll() {
   trip.reset();
   compass.resetCalibration();
-  gaugeMax = GAUGE_MIN_MAX;
+  gaugeMax = cfg.gaugeMin;
   memset(statCache, 0, sizeof(statCache));
 }
 
@@ -516,6 +529,28 @@ static void handleTouch() {
     }
     return;
   }
+  // Détail d'un trajet : un glissé ramène à la liste au lieu de changer de page
+  if (page == 3 && histSel >= 0 && (e == TE_SWIPE_L || e == TE_SWIPE_R)) {
+    histSel = -1;
+    drawHistList();
+    return;
+  }
+  if (e == TE_TAP && page == 3) {
+    histTap(touch.x, touch.y);
+    return;
+  }
+  if (e == TE_TAP && page == 4) {
+    SettingsAction a = settingsTap(touch.x, touch.y);
+    if (a == SA_CALIB_TOUCH) touchCalibrate();
+    if (a == SA_RESET_COMPASS) {
+      compass.resetCalibration();
+      tft.fillRect(0, SET_Y0 + 5 * SET_ROW_H, 320, SET_ROW_H, col::BG);
+      tft.setTextDatum(ML_DATUM);
+      tft.setTextColor(col::ORANGE, col::BG);
+      tft.drawString("Tournez la carte sur elle-meme", 8, SET_Y0 + 5 * SET_ROW_H + 17, 2);
+    }
+    return;
+  }
   switch (e) {
     case TE_SWIPE_L:
       page = (page + 1) % NB_PAGES;
@@ -532,7 +567,7 @@ static void handleTouch() {
       }
       break;
     case TE_LONG:
-      if (page != 2) {
+      if (page <= 1) {
         modalReset = true;
         drawResetModal();
       }
@@ -540,6 +575,22 @@ static void handleTouch() {
     default:
       break;
   }
+}
+
+static void updateLogger(uint32_t now) {
+  LogSample s;
+  bool fixOk = gps.location.isValid() && gps.location.age() < 3000 && gps.date.isValid() && gps.time.isValid();
+  if (fixOk) {
+    s.epoch = epochFromDate(gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(),
+                            gps.time.second());
+    s.lat = gps.location.lat();
+    s.lon = gps.location.lng();
+    s.alt = gps.altitude.isValid() ? (float)gps.altitude.meters() : 0;
+    s.kmh = speedKmh;
+    s.sats = (uint8_t)gps.satellites.value();
+    s.hdop = gps.hdop.isValid() ? (float)gps.hdop.hdop() : 0;
+  }
+  logger.update(now, cfg.logOn && sdOk, speedMoving, fixOk, s, cfg.tz);
 }
 
 static void handleButton() {
@@ -578,12 +629,16 @@ static void enterPage() {
     sprOk = makeSprite(DIAL_W, DIAL_H);
   } else if (page == 1) {
     sprOk = makeSprite(CMP_W, CMP_H);
-  } else {
+  } else if (page == 2) {
     spr.deleteSprite();
     band.deleteSprite();
     band.setColorDepth(16);
     sprOk = band.createSprite(320, BAND_H) != nullptr;
     mapEnter();
+  } else {  // trajets, réglages : dessin direct, pas de sprite
+    spr.deleteSprite();
+    band.deleteSprite();
+    sprOk = false;
   }
   memset(statCache, 0, sizeof(statCache));
   memset(destCache, 0, sizeof(destCache));
@@ -595,7 +650,9 @@ static void enterPage() {
     tft.setTextColor(col::DIM, col::BG);
     tft.drawString("DESTINATION", 209, 40, 2);
   }
-  if (!sprOk) {
+  if (page == 3) histEnter();
+  if (page == 4) settingsEnter();
+  if (!sprOk && page < 3) {
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(col::ORANGE, col::BG);
     tft.drawString("Memoire insuffisante", 160, 120, 4);
@@ -661,6 +718,8 @@ static void renderSlow() {
 void setup() {
   Serial.begin(115200);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
+  cfg.load();
+  gaugeMax = cfg.gaugeMin;
 
   tft.init();
   tft.setRotation(1);  // paysage 320x240
@@ -677,6 +736,10 @@ void setup() {
     destLat = track.destLat();
     destLon = track.destLon();
     Serial.printf("Trace GPX : %d points, %.1f km\n", track.count(), track.totalM() / 1000.0f);
+  }
+  if (sdOk) {
+    logger.begin();
+    tripsRebuildIndex();
   }
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   Wire.setClock(100000);
@@ -698,6 +761,7 @@ void loop() {
   while (Serial2.available()) gps.encode(Serial2.read());
   updateSpeed(millis());
   updateTrip();
+  updateLogger(millis());
   if (compass.ok() && millis() - lastCompass >= 20) {  // 50 Hz max
     lastCompass = millis();
     compass.update();

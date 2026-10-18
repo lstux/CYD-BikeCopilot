@@ -18,7 +18,7 @@ Bouton BOOT : appui court = page suivante, appui long (> 1 s) = remise à zéro 
 
 - ESP32-2432S028 (ESP32-WROOM-32, écran ILI9341 320×240, lecteur microSD)
 - Module GPS (type « Cyclone » AliExpress, trames NMEA 9600 bauds)
-- Boussole QMC5883L (`0x0D`) ou QMC5883P (`0x2C`)
+- Boussole QMC5883P (`0x2C`, le QMC5883L en `0x0D` est aussi géré)
 
 ### Câblage
 
@@ -45,13 +45,13 @@ Réglages dans `src/dashboard/config.h` : destination (`DEST_LAT`, `DEST_LON`), 
 ### Tests de câblage
 
 - `pio run -e i2cscan -t upload` : scanne le bus I2C (SDA=27 / SCL=22, puis l'inverse). Attendu : `0x0D` ou `0x2C`.
-- `pio run -e nmea -t upload` : recopie les trames NMEA reçues sur IO35 (essaie 9600, 38400, 115200, 4800 bauds).
+- `pio run -e nmea -t upload` : recopie les trames NMEA reçues sur IO35 (essaie 38400, 9600, 115200, 4800 bauds).
 
 ## Limites connues
 
 - Boussole : calibration à chaud (tourner la carte sur elle-même), non sauvegardée, cap à plat sans compensation d'inclinaison.
-- Initialisation du QMC5883P écrite d'après la datasheet, non testée.
-- IO35 est en entrée seule : pas de configuration du GPS possible (cadence, constellations) sans souder un fil sur une autre broche.
+- Initialisation du QMC5883P écrite d'après la datasheet : le module répond en `0x2C`, mais la lecture du cap reste à valider.
+- IO35 est en entrée seule (réception uniquement) : pas de configuration du GPS possible (cadence, constellations) sans souder un fil sur une autre broche.
 
 ## Licence
 

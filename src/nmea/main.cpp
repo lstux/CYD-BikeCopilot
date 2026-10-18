@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 static const int GPS_RX = 35;
-static const uint32_t BAUDS[] = {9600, 38400, 115200, 4800};
+static const uint32_t BAUDS[] = {38400, 9600, 115200, 4800};
 static const int NB_BAUDS = sizeof(BAUDS) / sizeof(BAUDS[0]);
 
 static int baudIdx = 0;

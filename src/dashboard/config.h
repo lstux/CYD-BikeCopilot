@@ -2,7 +2,7 @@
 
 // --- Câblage ---
 #define GPS_RX_PIN   35
-#define GPS_BAUD     9600
+#define GPS_BAUD     38400
 #define I2C_SDA_PIN  27
 #define I2C_SCL_PIN  22
 #define BUTTON_PIN   0      // bouton BOOT : appui court = page suivante, appui long = reset trajet

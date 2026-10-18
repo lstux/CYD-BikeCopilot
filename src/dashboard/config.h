@@ -22,3 +22,9 @@
 // --- Boussole ---
 #define COMPASS_OFFSET_DEG  0.0 // à ajuster selon l'orientation du module sur la carte
 #define COMPASS_INVERT      0   // 1 si le sens de rotation est inversé
+
+// --- Jauge de vitesse (échelle adaptative) ---
+#define GAUGE_MIN_MAX     15    // échelle de départ (km/h)
+#define GAUGE_STEP        5     // pas entre deux paliers
+#define GAUGE_DOWN_MS     8000  // durée sous le palier inférieur avant de redescendre d'un cran
+#define GAUGE_DOWN_RATIO  0.8   // "nettement sous" = moins de 80 % du palier inférieur

@@ -2,17 +2,21 @@
 
 Compteur / tableau de bord de vélo sur une carte **ESP32-2432S028 (« Cheap Yellow Display »)** avec un module GPS et une boussole QMC5883.
 
-> État : prototype. Le code n'a pas encore été testé sur le matériel.
+> État : prototype. Le câblage (GPS, I2C, boussole) est validé sur le matériel. La nouvelle interface (jauge, boussole tournante) est écrite mais pas encore testée à l'écran.
 
 ## Fonctions
 
 | Page | Contenu | État |
 |---|---|---|
-| 1. Compteur | vitesse, distance, moyenne, temps roulant, vitesse max, heure | codée |
-| 2. Direction | flèche vers une destination, distance à vol d'oiseau, cap GPS / boussole | codée |
+| 1. Compteur | jauge de vitesse à échelle adaptative, distance, temps roulant, moyenne, max, heure | codée |
+| 2. Direction | boussole tournante (haut = sens de marche), flèche vers la destination, distance à vol d'oiseau | codée |
 | 3. Carte | tuiles OSM depuis la carte SD, trace GPX, prochain virage | à faire |
 
 Bouton BOOT : appui court = page suivante, appui long (> 1 s) = remise à zéro du trajet.
+
+### Échelle de la jauge
+
+L'échelle part de 15 km/h. Dès que la vitesse la dépasse, elle passe au palier de 5 au-dessus (20, 25, 30…). Elle ne redescend d'un cran qu'après 8 s nettement sous le palier inférieur (moins de 80 % de sa valeur), pour éviter les sauts. Réglages dans `src/dashboard/config.h` (`GAUGE_*`).
 
 ## Matériel
 

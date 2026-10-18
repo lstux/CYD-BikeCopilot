@@ -4,6 +4,8 @@
 #include <TFT_eSPI.h>
 #include "page_gauge.h"
 #include "page_compass.h"
+#include "page_map.h"
+static const int NB_PAGES = 5;
 
 static void save(TFT_eSPI &t, const char *dir, const char *name) {
   char p[256];
@@ -48,5 +50,35 @@ int main(int argc, char **argv) {
   pg_compass::tile(scr, 251, "DEST.", "18°", col::ACCENT, pg_compass::cardinal16(18), "droite 66°");
   hud::pageDots(scr, 1, 5);
   save(tft, dir, "compass");
+
+  // --- carte ---
+  {
+    TFT_eSprite band(&tft);
+    band.createSprite(320, BAND_H);
+    MapView v;
+    memset(&v, 0, sizeof(v));
+    v.z = 16; v.spd = 18; v.heading = 0; v.hasTrack = v.onTrack = v.hasTurn = true;
+    v.turnA = 80; v.destVisible = true; v.dsx = 235; v.dsy = 12;
+    strcpy(v.turnNum, "120"); strcpy(v.turnUnit, "m"); strcpy(v.remNum, "4.2"); strcpy(v.remUnit, "km");
+    strcpy(v.eta, "14:31"); v.scalePx = 64; strcpy(v.scaleTxt, "100 m");
+    v.st = st;
+    int ax[3][4] = {{0, 165, 640, 165}, {65, 0, 65, 240}, {0, 20, 320, 75}};
+    Seg route[3] = {{160, 150, 160, 95}, {160, 95, 235, 95}, {235, 95, 235, 6}};
+    nVis = 3;
+    for (int i = 0; i < 3; i++) vis[i] = route[i];
+    for (int b = 0; b < MAP_H / BAND_H; b++) {
+      int by = b * BAND_H;
+      band.fillSprite(MAP_BG);
+      gfx::Surf S = gfx::onSprite(band, 0, by);
+      gfx::rect(S, 172, 102, 55, 55, RGB565(12, 27, 21));
+      gfx::rect(S, 7, 40, 50, 48, RGB565(12, 27, 21));
+      for (int i = 0; i < 3; i++) gfx::line(S, ax[i][0], ax[i][1], ax[i][2], ax[i][3], i == 2 ? 5.5f : 3.0f, i == 2 ? RGB565(38, 49, 61) : RGB565(23, 32, 42));
+      gfx::line(S, 0, 130, 320, 130, 3.0f, RGB565(23, 32, 42));
+      gfx::line(S, 100, 0, 100, 240, 3.0f, RGB565(23, 32, 42));
+      drawMapOverlay(band, by, v, 1, NB_PAGES);
+      band.pushSprite(0, by);
+    }
+    save(tft, dir, "map");
+  }
   return 0;
 }

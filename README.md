@@ -58,7 +58,7 @@ Le script `tools/make_tiles.py` (Python + Pillow) produit ce dossier :
 
 ```
 pip install pillow
-python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/
+python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/   # thème sombre par défaut, --theme light pour garder les couleurs OSM
 # ou une zone : --bbox LAT1 LON1 LAT2 LON2
 # ou convertir des tuiles PNG déjà téléchargées : --png-dir dossier_png
 ```

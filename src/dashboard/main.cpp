@@ -54,6 +54,33 @@ static void pollGps() {
   while (Serial2.available()) gps.encode(Serial2.read());
 }
 
+static void localTime(char *out, size_t n) {
+  if (!gps.time.isValid()) {
+    snprintf(out, n, "--:--");
+    return;
+  }
+  int h = (gps.time.hour() + cfg.tz + 24) % 24;
+  snprintf(out, n, "%02d:%02d", h, gps.time.minute());
+}
+
+static hud::Status currentStatus() {
+  hud::Status st;
+  st.sats = (int)gps.satellites.value();
+  st.fix = gps.location.isValid() && gps.location.age() < 3000;
+  TripLogger::State ls = logger.state();
+  st.rec = ls == TripLogger::ACTIVE ? 2 : (ls == TripLogger::PENDING ? 1 : 0);
+  localTime(st.clock, sizeof(st.clock));
+  return st;
+}
+
+// Vitesse retenue pour l'heure d'arrivée estimée : moyenne du trajet, sinon vitesse actuelle, sinon 15 km/h
+static float etaSpeedKmh() {
+  float v = 15.0f;
+  if (trip.movingMs > 60000) v = (float)(trip.distM / 1000.0) / (trip.movingMs / 3600000.0f);
+  else if (currentKmh() > 8) v = currentKmh();
+  return v < 5.0f ? 5.0f : v;
+}
+
 #include "mappage.h"
 #include "histpage.h"
 #include "settingspage.h"
@@ -127,25 +154,11 @@ static bool makeSprite(int w, int h) {
 }
 
 // --- Barre d'état ---
-static void localTime(char *out, size_t n) {
-  if (!gps.time.isValid()) {
-    snprintf(out, n, "--:--");
-    return;
-  }
-  int h = (gps.time.hour() + cfg.tz + 24) % 24;
-  snprintf(out, n, "%02d:%02d", h, gps.time.minute());
-}
-
 static gfx::Surf scr() { return gfx::onScreen(tft, col::BG); }
 
 static void drawStatusBar(bool force = false) {
   static char cache[32];
-  hud::Status st;
-  st.sats = (int)gps.satellites.value();
-  st.fix = gps.location.isValid() && gps.location.age() < 3000;
-  TripLogger::State ls = logger.state();
-  st.rec = ls == TripLogger::ACTIVE ? 2 : (ls == TripLogger::PENDING ? 1 : 0);
-  localTime(st.clock, sizeof(st.clock));
+  hud::Status st = currentStatus();
   char key[32];
   snprintf(key, sizeof(key), "%d|%d|%d|%s", st.sats, st.fix, st.rec, st.clock);
   if (!force && strcmp(key, cache) == 0) return;
@@ -474,8 +487,7 @@ static void handleTouch() {
       break;
     case TE_TAP:
       if (page == 2) {
-        if (touch.x < 110) mapZoomStep(-1);
-        else if (touch.x > 210) mapZoomStep(+1);
+        if (touch.x >= 268 && touch.y >= 80 && touch.y <= 166) mapZoomStep(touch.y < 122 ? +1 : -1);
       }
       break;
     case TE_LONG:
@@ -593,7 +605,7 @@ static void renderFrame(uint32_t now) {
 }
 
 static void renderSlow() {
-  drawStatusBar();
+  if (page != 2 || !sdOk || noFixShown) drawStatusBar();
   if (page == 0) drawStats();
   else if (page == 1) drawDirectionTiles();
 }

@@ -84,10 +84,43 @@ def tiles_for_bbox(lat1, lon1, lat2, lon2, z):
     return [(x, y) for x in range(x1, x2 + 1) for y in range(y1, y2 + 1)]
 
 
+# Thème sombre : courbe de luminance (entrée -> sortie), puis teinte bleutée ; eau et parcs gardent
+# une dominante bleue / verte. Le fond OSM (~242) devient #0A0F14, les routes blanches ~#26313D.
+_CURVE = [(0, 120), (90, 78), (170, 34), (205, 22), (236, 15), (244, 14), (250, 30), (255, 48)]
+_LUT = []
+for _l in range(256):
+    for (_a, _b), (_c, _d) in zip(_CURVE, _CURVE[1:]):
+        if _a <= _l <= _c:
+            _LUT.append(_b + (_d - _b) * (_l - _a) / max(1, _c - _a))
+            break
+
+
+def dark_filter(img):
+    out = bytearray()
+    raw = img.tobytes()
+    for k in range(0, len(raw), 3):
+        r, g, b = raw[k], raw[k + 1], raw[k + 2]
+        lum = (r * 299 + g * 587 + b * 114) // 1000
+        v = _LUT[lum]
+        if b - r > 22 and b >= g - 4 and lum > 150:  # eau
+            rr, gg, bb = v * 0.55, v * 1.05, v * 1.6
+        elif g - r > 18 and g > b and lum > 150:  # parcs, bois
+            rr, gg, bb = v * 0.7, v * 1.25, v * 0.95
+        else:
+            rr, gg, bb = v * 0.85, v * 1.0, v * 1.1
+        out += bytes((min(255, int(rr)), min(255, int(gg)), min(255, int(bb))))
+    return Image.frombytes("RGB", img.size, bytes(out))
+
+
+THEME = "dark"
+
+
 def to_rgb565_be(img):
     img = img.convert("RGB")
     if img.size != (256, 256):
         img = img.resize((256, 256), Image.LANCZOS)
+    if THEME == "dark":
+        img = dark_filter(img)
     out = bytearray(256 * 256 * 2)
     i = 0
     raw = img.tobytes()
@@ -118,8 +151,11 @@ def main():
     ap.add_argument("--user-agent", default="CYD-BikeCopilot-tiles/1.0 (usage personnel)")
     ap.add_argument("--delay", type=float, default=0.6, help="secondes entre deux requêtes")
     ap.add_argument("--max-tiles", type=int, default=400, help="plafond de tuiles à télécharger")
+    ap.add_argument("--theme", choices=("dark", "light"), default="dark", help="thème de la carte (déf. dark)")
     ap.add_argument("--dry-run", action="store_true", help="compter les tuiles sans rien faire")
     a = ap.parse_args()
+    global THEME
+    THEME = a.theme
 
     if not a.gpx and not a.bbox and not a.png_dir:
         ap.error("donnez --gpx, --bbox ou --png-dir")

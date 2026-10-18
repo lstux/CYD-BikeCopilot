@@ -52,8 +52,8 @@ struct Status {
   char clock[8] = "--:--";
 };
 
-static void statusBar(const Surf &s, const Status &st) {
-  rect(s, 0, 0, 320, 20, col::BG);
+static void statusBar(const Surf &s, const Status &st, bool clear = true) {
+  if (clear) rect(s, 0, 0, 320, 20, col::BG);
   int lit = st.fix ? (st.sats + 2) / 3 : 0;
   if (lit > 4) lit = 4;
   for (int i = 0; i < 4; i++) {
@@ -62,7 +62,6 @@ static void statusBar(const Surf &s, const Status &st) {
   }
   char b[16];
   snprintf(b, sizeof(b), "%d sat", st.sats);
-  withBg(s, col::BG);
   text(s, FONT_S11, 28, 15, b, col::SEC);
   int cw = text(s, FONT_S13, 316, 16, st.clock, col::TXT, AL_R);
   if (st.rec) {
@@ -78,10 +77,10 @@ static void statusBar(const Surf &s, const Status &st) {
 }
 
 // --- pastilles de page (bas, y = 231) -------------------------------------------------------
-static void pageDots(const Surf &s, int page, int n) {
+static void pageDots(const Surf &s, int page, int n, bool clear = true) {
   int total = 14 + (n - 1) * 4 + (n - 1) * 5;
   int x = 160 - total / 2;
-  rect(s, 0, 226, 320, 14, col::BG);
+  if (clear) rect(s, 0, 226, 320, 14, col::BG);
   for (int i = 0; i < n; i++) {
     if (i == page) {
       roundRect(s, x, 229, 14, 4, 2, col::ACCENT);

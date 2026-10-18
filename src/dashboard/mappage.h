@@ -12,14 +12,7 @@
 #include <SPI.h>
 #include "tiles.h"
 #include "track.h"
-
-static const int MAP_Y0 = 24, MAP_H = 216, BAND_H = 18;  // zone carte : y 24..239
-static const int MAP_CX = 160, MAP_CY = MAP_Y0 + MAP_H / 2;
-static const uint8_t MAP_ZOOMS[3] = {15, 16, 17};
-static const uint16_t MAP_BG = RGB565(232, 228, 220);
-static const uint16_t MAP_DARK = RGB565(10, 12, 16);
-static const uint16_t MAP_BLUE = RGB565(23, 105, 255);
-static const uint16_t MAP_RED = RGB565(224, 48, 30);
+#include "page_map.h"
 
 TFT_eSprite band(&tft);
 TileCache tiles;
@@ -33,162 +26,14 @@ static bool mapForce = true;
 static bool noFixShown = false;
 static int32_t lastOx = 0, lastOy = 0;
 static uint32_t lastMapMs = 0;
-static char lastKey[64];
+static char lastKey[96];
 static float lastHeading = 0;
 
-// Segments de trace visibles, en coordonnées écran
-struct Seg {
-  int16_t x0, y0, x1, y1;
-};
-static const int MAX_VIS = 500;
-static Seg vis[MAX_VIS];
-static int nVis = 0;
-
-// Données de l'image en cours (calculées avant le dessin des bandes)
-struct MapView {
-  int z;
-  int spd;
-  float heading;
-  bool hasTrack, onTrack, hasTurn;
-  float turnD, turnA, remain;
-  bool destVisible;
-  int dsx, dsy;
-  char turnTxt[16], remTxt[16];
-};
-
-static void fmtDist(char *out, size_t n, float m) {
-  if (m < 100)
-    snprintf(out, n, "%d m", (int)(m / 5 + 0.5f) * 5);
-  else if (m < 1000)
-    snprintf(out, n, "%d m", (int)(m / 10 + 0.5f) * 10);
-  else if (m < 10000)
-    snprintf(out, n, "%.1f km", m / 1000.0f);
-  else
-    snprintf(out, n, "%d km", (int)(m / 1000.0f + 0.5f));
-}
-
-static bool inBand(int by, int y0, int y1) { return y1 >= by && y0 < by + BAND_H; }
-
-// Icône de virage centrée en (cx,cy) ; angle > 0 : droite, < 0 : gauche
-static void drawTurnIcon(TFT_eSPI &g, int cx, int cy, bool straight, float angle, uint16_t color) {
-  if (straight) {
-    thickLine(g, cx, cy + 11, cx, cy - 6, 4, color);
-    g.fillTriangle(cx - 8, cy - 4, cx + 8, cy - 4, cx, cy - 13, color);
-    return;
-  }
-  int s = angle >= 0 ? 1 : -1;
-  thickLine(g, cx - s * 7, cy + 11, cx - s * 7, cy - 3, 4, color);
-  thickLine(g, cx - s * 7, cy - 3, cx + s * 3, cy - 3, 4, color);
-  g.fillTriangle(cx + s * 2, cy - 10, cx + s * 2, cy + 4, cx + s * 12, cy - 3, color);
-}
-
-static void drawMapOverlay(int by, const MapView &v) {
-  // Trace : liseré blanc puis trait bleu
-  for (int pass = 0; pass < 2; pass++) {
-    uint16_t c = pass == 0 ? col::WHITE : MAP_BLUE;
-    float w = pass == 0 ? 6.5f : 4.0f;
-    int r = pass == 0 ? 3 : 2;
-    for (int k = 0; k < nVis; k++) {
-      const Seg &s = vis[k];
-      int ya = s.y0 < s.y1 ? s.y0 : s.y1, yb = s.y0 < s.y1 ? s.y1 : s.y0;
-      if (!inBand(by, ya - 4, yb + 4)) continue;
-      thickLine(band, s.x0, s.y0 - by, s.x1, s.y1 - by, w, c);
-      band.fillCircle(s.x1, s.y1 - by, r, c);
-      band.fillCircle(s.x0, s.y0 - by, r, c);
-    }
-  }
-
-  // Destination
-  if (v.destVisible && inBand(by, v.dsy - 10, v.dsy + 10)) {
-    band.fillCircle(v.dsx, v.dsy - by, 9, col::WHITE);
-    band.fillCircle(v.dsx, v.dsy - by, 7, MAP_RED);
-    band.fillCircle(v.dsx, v.dsy - by, 2, col::WHITE);
-  }
-
-  // Position (flèche orientée selon le cap, nord en haut)
-  if (inBand(by, MAP_CY - 20, MAP_CY + 20)) {
-    float a = v.heading * (float)M_PI / 180.0f;
-    float ca = cosf(a), sa = sinf(a);
-    const float P[4][2] = {{0, -16}, {-11, 12}, {0, 6}, {11, 12}};
-    int X[4], Y[4];
-    for (int pass = 0; pass < 2; pass++) {
-      float k = pass == 0 ? 1.0f : 0.68f;
-      for (int i = 0; i < 4; i++) {
-        float px = P[i][0] * k, py = P[i][1] * k;
-        X[i] = MAP_CX + (int)lroundf(px * ca - py * sa);
-        Y[i] = MAP_CY - by + (int)lroundf(px * sa + py * ca);
-      }
-      uint16_t c = pass == 0 ? col::WHITE : MAP_BLUE;
-      band.fillTriangle(X[0], Y[0], X[1], Y[1], X[2], Y[2], c);
-      band.fillTriangle(X[0], Y[0], X[3], Y[3], X[2], Y[2], c);
-    }
-  }
-
-  // Vitesse (en haut à gauche)
-  if (inBand(by, 29, 63)) {
-    char buf[8];
-    band.fillRoundRect(5, 29 - by, 80, 34, 6, MAP_DARK);
-    snprintf(buf, sizeof(buf), "%d", v.spd);
-    band.setTextDatum(TL_DATUM);
-    band.setTextColor(col::WHITE, MAP_DARK);
-    band.drawString(buf, 12, 34 - by, 4);
-    int w = band.textWidth(buf, 4);
-    band.setTextColor(col::DIM, MAP_DARK);
-    band.drawString("km/h", 12 + w + 4, 46 - by, 2);
-  }
-
-  // Nord (en haut à droite)
-  if (inBand(by, 26, 54)) {
-    band.fillCircle(298, 40 - by, 14, MAP_DARK);
-    band.setTextDatum(MC_DATUM);
-    band.setTextColor(col::NEEDLE, MAP_DARK);
-    band.drawString("N", 298, 40 - by, 2);
-  }
-
-  // Attribution OpenStreetMap (obligatoire)
-  if (inBand(by, 194, 207)) {
-    band.fillRect(212, 196 - by, 108, 12, col::WHITE);
-    band.setTextDatum(TR_DATUM);
-    band.setTextColor(RGB565(60, 60, 60), col::WHITE);
-    band.drawString("(c) OpenStreetMap", 318, 198 - by, 1);
-  }
-
-  // Bandeau du bas : prochain virage, distance restante, zoom
-  if (inBand(by, 208, 239)) {
-    band.fillRect(0, 208 - by, 320, 32, MAP_DARK);
-    band.setTextPadding(0);
-    band.setTextDatum(ML_DATUM);
-    if (!v.hasTrack) {
-      band.setTextColor(col::DIM, MAP_DARK);
-      band.drawString("pas de trace", 8, 224 - by, 2);
-    } else if (!v.onTrack) {
-      band.setTextColor(col::ORANGE, MAP_DARK);
-      band.drawString("hors trace", 8, 224 - by, 2);
-    } else {
-      drawTurnIcon(band, 22, 224 - by, !v.hasTurn, v.turnA, col::CYAN);
-      band.setTextColor(col::WHITE, MAP_DARK);
-      if (v.hasTurn)
-        band.drawString(v.turnTxt, 42, 224 - by, 4);
-      else
-        band.drawString("tout droit", 42, 224 - by, 2);
-    }
-    band.setTextDatum(MC_DATUM);
-    band.setTextColor(col::WHITE, MAP_DARK);
-    band.drawString(v.remTxt, 214, 224 - by, 4);
-    band.setTextDatum(MR_DATUM);
-    band.setTextColor(col::DIM, MAP_DARK);
-    char zt[8];
-    snprintf(zt, sizeof(zt), "z%d", v.z);
-    band.drawString(zt, 314, 224 - by, 2);
-  }
-}
-
 static void mapMessage(const char *msg, uint16_t color) {
-  tft.fillRect(0, MAP_Y0, 320, MAP_H, col::BG);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextPadding(0);
-  tft.setTextColor(color, col::BG);
-  tft.drawString(msg, 160, 130, 4);
+  tft.fillRect(0, 20, 320, 206, col::BG);
+  Surf s = onScreen(tft, col::BG);
+  text(s, FONT_B17, 160, 125, msg, color, AL_C);
+  hud::pageDots(s, 2, NB_PAGES);
 }
 
 static float navHeading(float kmh) {
@@ -224,7 +69,7 @@ static void mapEnter() {
 static void renderMapPage(uint32_t now) {
   if (!sdOk) {
     if (mapForce) {
-      mapMessage("Carte SD absente", col::ORANGE);
+      mapMessage("Carte SD absente", col::AMBER);
       mapForce = false;
     }
     return;
@@ -232,12 +77,13 @@ static void renderMapPage(uint32_t now) {
   bool fix = gps.location.isValid() && gps.location.age() < 3000;
   if (!fix) {
     if (!noFixShown) {
-      mapMessage("En attente du fix GPS", col::ORANGE);
+      mapMessage("En attente du fix GPS", col::AMBER);
       noFixShown = true;
       mapForce = true;
     }
     return;
   }
+  noFixShown = false;
   if (now - lastMapMs < 300) return;
 
   const int z = MAP_ZOOMS[mapZoomIdx];
@@ -245,7 +91,7 @@ static void renderMapPage(uint32_t now) {
   double wxd, wyd;
   worldPx(lat, lon, z, wxd, wyd);
   int32_t ox = (int32_t)floor(wxd) - MAP_CX;
-  int32_t oy = (int32_t)floor(wyd) - MAP_H / 2;
+  int32_t oy = (int32_t)floor(wyd) - MAP_CY;
 
   float kmh = currentKmh();
   MapView v;
@@ -262,13 +108,33 @@ static void renderMapPage(uint32_t now) {
   } else {
     v.remain = (float)TinyGPSPlus::distanceBetween(lat, lon, destLat, destLon);
   }
-  fmtDist(v.turnTxt, sizeof(v.turnTxt), v.turnD);
-  fmtDist(v.remTxt, sizeof(v.remTxt), v.remain);
+  splitDist(v.turnNum, sizeof(v.turnNum), v.turnUnit, v.turnD);
+  splitDist(v.remNum, sizeof(v.remNum), v.remUnit, v.remain);
+  v.st = currentStatus();
+  {  // heure d'arrivée estimée
+    int mins = (int)(v.remain / 1000.0f / etaSpeedKmh() * 60.0f + 0.5f);
+    if (gps.time.isValid()) {
+      int t = ((gps.time.hour() + cfg.tz + 24) % 24) * 60 + gps.time.minute() + mins;
+      snprintf(v.eta, sizeof(v.eta), "%02d:%02d", (t / 60) % 24, t % 60);
+    } else {
+      strcpy(v.eta, "--:--");
+    }
+  }
+  {  // échelle : plus grande longueur « ronde » qui tient dans 72 px
+    float mpp = 156543.034f * cosf((float)lat * 0.017453292f) / (float)(1 << z);
+    static const int NICE[] = {10, 20, 50, 100, 200, 500, 1000, 2000, 5000};
+    v.scaleM = NICE[0];
+    for (int n : NICE) if (n / mpp <= 72.0f) v.scaleM = n;
+    v.scalePx = (int)(v.scaleM / mpp + 0.5f);
+    if (v.scaleM >= 1000) snprintf(v.scaleTxt, sizeof(v.scaleTxt), "%d km", v.scaleM / 1000);
+    else snprintf(v.scaleTxt, sizeof(v.scaleTxt), "%d m", v.scaleM);
+  }
 
   // Faut-il redessiner ?
-  char key[64];
-  snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s|%s", v.spd, z, (int)(v.heading / 8), v.onTrack,
-           v.hasTurn, v.turnTxt, v.remTxt);
+  char key[96];
+  snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s%s|%s%s|%s|%s|%d%d%d|%d", v.spd, z, (int)(v.heading / 8), v.onTrack,
+           v.hasTurn, v.turnNum, v.turnUnit, v.remNum, v.remUnit, v.eta, v.st.clock, v.st.sats, v.st.fix, v.st.rec,
+           (int)v.turnA / 10);
   bool moved = labs((long)(ox - lastOx)) >= 2 || labs((long)(oy - lastOy)) >= 2;
   if (!mapForce && !moved && strcmp(key, lastKey) == 0) return;
   strncpy(lastKey, key, sizeof(lastKey) - 1);
@@ -318,7 +184,7 @@ static void renderMapPage(uint32_t now) {
                       buf + 2 * (r * 320 + (px0 - ox)));
       }
     }
-    drawMapOverlay(by, v);
+    drawMapOverlay(band, by, v, mapZoomIdx, NB_PAGES);
     band.pushSprite(0, by);
     pollGps();  // le GPS continue d'envoyer pendant le dessin
   }

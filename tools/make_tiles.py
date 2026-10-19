@@ -4,18 +4,28 @@
 Sortie : <out>/tiles/<z>/<x>/<y>.raw  (256x256, RGB565 big-endian, 131072 octets)
          + copie optionnelle de la trace en <out>/route.gpx
 
+Les tuiles ORIGINALES (PNG) sont conservées dans un cache :
+  <cache>/<style>/<z>/<x>/<y>.png     (par défaut tiles_src/osm/...)
+Une tuile n'est donc téléchargée qu'une seule fois ; on peut ensuite changer de thème ou de
+traitement et reconvertir sans réseau (--offline), en écrasant les anciens .raw (--force).
+
 Sources de tuiles :
+  (défaut)        cache puis téléchargement (serveur OSM, {z}/{x}/{y})
+  --url TEMPLATE  autre fournisseur ; donnez aussi --style NOM pour un cache séparé
   --png-dir DIR   convertit des tuiles PNG déjà présentes (DIR/<z>/<x>/<y>.png)
-  --url TEMPLATE  télécharge (défaut : serveur OSM, {z}/{x}/{y}) — limité, voir ci-dessous
 
 Politique d'usage des tuiles OSM : pas de téléchargement massif, User-Agent identifiant,
 pas plus de 2 requêtes/s. Pour une grande zone, utilisez un fournisseur de tuiles adapté
-ou --png-dir avec des tuiles obtenues légalement. Ce script plafonne à --max-tiles.
+ou --png-dir avec des tuiles obtenues légalement. Ce script plafonne à --max-tiles le nombre
+de tuiles À TÉLÉCHARGER (celles déjà dans le cache ne comptent pas).
 
 Exemples :
   python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/
   python3 tools/make_tiles.py --bbox 48.84 2.28 48.87 2.33 --zoom 16 --out sd/
+  python3 tools/make_tiles.py --bbox 48.84 2.28 48.87 2.33 --zoom 16 --out sd/ --offline --force --theme light
   python3 tools/make_tiles.py --png-dir mes_tuiles_png --zoom 16 --out sd/
+
+La page tools/tiles-manager.html aide à choisir les zones et génère ces commandes.
 """
 import argparse
 import math
@@ -148,6 +158,10 @@ def main():
     ap.add_argument("--out", default="sd", help="dossier de sortie (à copier à la racine de la SD)")
     ap.add_argument("--png-dir", help="convertir des tuiles PNG locales (<z>/<x>/<y>.png)")
     ap.add_argument("--url", default=DEFAULT_URL, help="modèle d'URL avec {z} {x} {y}")
+    ap.add_argument("--style", default="osm", help="nom du fond de carte = sous-dossier du cache (déf. osm)")
+    ap.add_argument("--cache", default="tiles_src", help="dossier des tuiles originales PNG (déf. tiles_src)")
+    ap.add_argument("--offline", action="store_true", help="ne rien télécharger : convertir seulement ce qui est dans le cache")
+    ap.add_argument("--force", action="store_true", help="réécrire les .raw déjà présents (après un changement de thème)")
     ap.add_argument("--user-agent", default="CYD-BikeCopilot-tiles/1.0 (usage personnel)")
     ap.add_argument("--delay", type=float, default=0.6, help="secondes entre deux requêtes")
     ap.add_argument("--max-tiles", type=int, default=400, help="plafond de tuiles à télécharger")
@@ -178,26 +192,42 @@ def main():
         print("zoom %d : %d tuiles (%.1f Mo)" % (z, len(t), len(t) * 128 / 1024))
         todo += [(z, x, y) for x, y in t]
 
-    print("total : %d tuiles, %.1f Mo" % (len(todo), len(todo) * 128 / 1024))
+    def src_path(z, x, y):
+        if a.png_dir:
+            return os.path.join(a.png_dir, str(z), str(x), "%d.png" % y)
+        return os.path.join(a.cache, a.style, str(z), str(x), "%d.png" % y)
+
+    missing = [t for t in todo if not os.path.exists(src_path(*t))]
+    print("total : %d tuiles, %.1f Mo sur la SD ; %d dans le cache, %d à télécharger"
+          % (len(todo), len(todo) * 128 / 1024, len(todo) - len(missing), len(missing)))
     if a.dry_run:
         return
-    if not a.png_dir and len(todo) > a.max_tiles:
-        sys.exit("Trop de tuiles pour un téléchargement depuis un serveur public (%d > %d).\n"
+    if not a.png_dir and not a.offline and len(missing) > a.max_tiles:
+        sys.exit("Trop de tuiles à télécharger depuis un serveur public (%d > %d).\n"
                  "Réduisez la zone/les zooms, utilisez un autre fournisseur, ou --max-tiles (avec modération)."
-                 % (len(todo), a.max_tiles))
+                 % (len(missing), a.max_tiles))
 
-    done = skipped = failed = 0
+    done = skipped = failed = unavailable = 0
     for i, (z, x, y) in enumerate(todo, 1):
         dst = os.path.join(a.out, "tiles", str(z), str(x), "%d.raw" % y)
-        if os.path.exists(dst) and os.path.getsize(dst) == 131072:
+        if not a.force and os.path.exists(dst) and os.path.getsize(dst) == 131072:
             skipped += 1
             continue
+        src = src_path(z, x, y)
         try:
-            if a.png_dir:
-                img = Image.open(os.path.join(a.png_dir, str(z), str(x), "%d.png" % y))
+            if os.path.exists(src):
+                img = Image.open(src)
+                img.load()
+            elif a.png_dir or a.offline:
+                unavailable += 1
+                continue
             else:
                 data = fetch(a.url.format(z=z, x=x, y=y), a.user_agent)
                 img = Image.open(BytesIO(data))
+                img.load()
+                os.makedirs(os.path.dirname(src), exist_ok=True)  # on garde l'original tel quel
+                with open(src, "wb") as f:
+                    f.write(data)
                 time.sleep(a.delay)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             with open(dst, "wb") as f:
@@ -212,8 +242,8 @@ def main():
     if a.gpx:
         os.makedirs(a.out, exist_ok=True)
         shutil.copyfile(a.gpx, os.path.join(a.out, "route.gpx"))
-    print("fait : %d écrites, %d déjà présentes, %d échecs → copiez le contenu de '%s' à la racine de la SD"
-          % (done, skipped, failed, a.out))
+    print("fait : %d écrites, %d déjà présentes, %d échecs%s → copiez le contenu de '%s' à la racine de la SD"
+          % (done, skipped, failed, (", %d absentes du cache" % unavailable) if unavailable else "", a.out))
 
 
 if __name__ == "__main__":

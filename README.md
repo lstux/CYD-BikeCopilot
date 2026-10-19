@@ -63,8 +63,22 @@ python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/   # thème
 # ou convertir des tuiles PNG déjà téléchargées : --png-dir dossier_png
 ```
 
-Puis copier le contenu de `sd/` à la racine de la carte. `--dry-run` compte les tuiles sans rien faire.
-Le téléchargement est plafonné (`--max-tiles`) : la [politique des serveurs OSM](https://operations.osmfoundation.org/policies/tiles/) interdit le téléchargement massif ; pour une grande zone, utiliser un autre fournisseur ou `--png-dir`.
+Puis copier le contenu de `sd/` à la racine de la carte. `--dry-run` compte les tuiles (et celles déjà en cache) sans rien faire.
+
+**Tuiles originales.** Les PNG téléchargés sont gardés tels quels dans `tiles_src/<fond>/<z>/<x>/<y>.png` (`--cache`, `--style`) : une tuile n'est téléchargée qu'une fois. Pour changer de thème ou de traitement sans réseau :
+
+```
+python3 tools/make_tiles.py --bbox LAT1 LON1 LAT2 LON2 --zoom 13 14 15 16 17 --out sd/ --offline --force --theme light
+```
+
+`--offline` convertit seulement ce qui est dans le cache, `--force` réécrit les `.raw` existants. Le plafond `--max-tiles` ne compte que les tuiles **à télécharger** ; la [politique des serveurs OSM](https://operations.osmfoundation.org/policies/tiles/) interdit le téléchargement massif : pour une grande zone, utiliser un autre fournisseur (`--style NOM --url 'https://…/{z}/{x}/{y}.png'`) ou `--png-dir`.
+
+**Choisir les zones : `tools/tiles-manager.html`.** Page autonome (Leaflet) : on dessine des rectangles ou on charge un GPX, on coche les zooms 13 à 17, et elle affiche le nombre de tuiles et la taille sur la SD, puis les commandes `make_tiles.py` à copier (téléchargement + conversion, et reconversion depuis le cache). Elle ne télécharge aucune tuile : c'est le script qui le fait. Le fond de la page vient d'OSM, qui demande un Referer ; si la carte reste grise, servez la page en local :
+
+```
+python3 -m http.server -d tools 8000     # puis http://localhost:8000/tiles-manager.html
+```
+
 Sans `route.gpx`, la carte s'affiche quand même, centrée sur la position.
 
 **Destination** (page Direction : distance, cap et arrivée ; page Carte : trait rouge et distance restante). Par défaut (*automatique*) : fin de `route.gpx` s'il existe, sinon le domicile. On peut la changer de trois façons :

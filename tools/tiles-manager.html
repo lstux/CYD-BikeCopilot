@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tuiles BikeCopilot</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root {
+  --bg: #f5f6f8; --panel: #ffffff; --ink: #1b2430; --mute: #667085; --line: #d9dee6;
+  --acc: #0b7fb3; --acc-ink: #ffffff; --warn: #b54708; --warn-bg: #fff4e5; --code: #0f1720; --code-ink: #cfe8f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1319; --panel: #161d26; --ink: #e6edf5; --mute: #93a1b3; --line: #2a3441;
+    --acc: #3bb0e0; --acc-ink: #06141c; --warn: #ffb257; --warn-bg: #2a2012; --code: #0a0f14; --code-ink: #cfe8f5;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; }
+#map { flex: 1 1 auto; min-width: 0; height: 100%; }
+#side { flex: 0 0 430px; max-width: 46vw; height: 100%; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line); padding: 16px; }
+@media (max-width: 860px) {
+  body { flex-direction: column; }
+  #map { height: 46vh; flex: none; }
+  #side { flex: 1 1 auto; max-width: none; border-left: 0; border-top: 1px solid var(--line); }
+}
+h1 { font-size: 18px; margin: 0 0 2px; }
+h2 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--mute); margin: 20px 0 8px; }
+.sub { color: var(--mute); margin: 0 0 4px; }
+label { display: block; color: var(--mute); font-size: 12px; margin: 8px 0 3px; }
+input, select, button, textarea { font: inherit; color: var(--ink); }
+input[type=text], input[type=number], select {
+  width: 100%; padding: 6px 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+}
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row > * { flex: 1 1 auto; }
+.row > div { flex: 1 1 110px; min-width: 0; }
+.row > input[type=text] { width: auto; min-width: 0; }
+button {
+  padding: 7px 12px; border: 1px solid var(--line); background: var(--bg); border-radius: 6px; cursor: pointer;
+}
+button:hover { border-color: var(--acc); }
+button.primary { background: var(--acc); color: var(--acc-ink); border-color: var(--acc); font-weight: 600; }
+button.on { outline: 2px solid var(--acc); }
+button.link { border: 0; background: none; color: var(--mute); padding: 2px 6px; flex: none; }
+button.link:hover { color: var(--warn); }
+.zooms { display: flex; gap: 6px; flex-wrap: wrap; }
+.zooms label { display: flex; align-items: center; gap: 5px; margin: 0; padding: 5px 9px; border: 1px solid var(--line);
+  border-radius: 6px; color: var(--ink); font-size: 13px; cursor: pointer; }
+.zones { display: grid; gap: 8px; }
+.zone { border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 6px; padding: 8px 10px; background: var(--bg); }
+.zone .top { display: flex; gap: 6px; align-items: center; }
+.zone input[type=text] { flex: 1 1 auto; font-weight: 600; background: transparent; border-color: transparent; padding: 2px 4px; }
+.zone input[type=text]:focus { border-color: var(--line); background: var(--panel); }
+.zone .meta { color: var(--mute); font-size: 12px; margin-top: 3px; }
+.zone .meta b { color: var(--ink); font-weight: 600; }
+.zone .mg { display: inline-flex; align-items: center; gap: 4px; }
+.zone .mg input { width: 54px; padding: 2px 5px; }
+.sum { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.stat .v { font-size: 20px; font-weight: 700; }
+.stat .k { color: var(--mute); font-size: 12px; }
+.note { background: var(--warn-bg); color: var(--warn); border-radius: 6px; padding: 8px 10px; margin-top: 8px; font-size: 13px; }
+.hint { color: var(--mute); font-size: 12px; margin-top: 6px; }
+pre { margin: 6px 0 0; padding: 10px; background: var(--code); color: var(--code-ink); border-radius: 6px; overflow-x: auto;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+.cmdhead { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+.cmdhead span { font-weight: 600; }
+#banner { position: absolute; z-index: 1000; left: 50px; right: 10px; top: 10px; display: none; pointer-events: none; }
+#banner div { background: var(--warn-bg); color: var(--warn); padding: 8px 12px; border-radius: 6px; font-size: 13px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25); max-width: 560px; }
+.leaflet-container.drawing { cursor: crosshair; }
+.leaflet-tooltip { font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="banner"><div></div></div>
+
+<aside id="side">
+  <h1>Tuiles BikeCopilot</h1>
+  <p class="sub">Choisir les zones à mettre sur la SD, compter les tuiles, copier les commandes.</p>
+
+  <h2>Fond de carte</h2>
+  <label for="style">Fond</label>
+  <select id="style">
+    <option value="osm">OpenStreetMap (serveur officiel)</option>
+    <option value="custom">Autre fournisseur…</option>
+  </select>
+  <div id="customBox" style="display:none">
+    <label for="styleName">Nom (sous-dossier du cache)</label>
+    <input type="text" id="styleName" value="mon-fond" spellcheck="false">
+    <label for="styleUrl">Modèle d'URL ({z} {x} {y})</label>
+    <input type="text" id="styleUrl" placeholder="https://exemple.org/{z}/{x}/{y}.png" spellcheck="false">
+  </div>
+  <div class="row">
+    <div><label for="theme">Thème de conversion</label>
+      <select id="theme"><option value="dark">Sombre</option><option value="light">Clair (couleurs d'origine)</option></select></div>
+    <div><label for="cache">Cache des originales</label><input type="text" id="cache" value="tiles_src" spellcheck="false"></div>
+    <div><label for="out">Dossier de sortie</label><input type="text" id="out" value="sd/" spellcheck="false"></div>
+  </div>
+
+  <h2>Niveaux de zoom</h2>
+  <div class="zooms" id="zooms"></div>
+
+  <h2>Zones</h2>
+  <div class="row">
+    <button id="draw">Dessiner un rectangle</button>
+    <button id="gpxBtn">Charger un GPX…</button>
+    <button id="clear">Tout effacer</button>
+  </div>
+  <input type="file" id="gpxFile" accept=".gpx,application/gpx+xml,text/xml" hidden>
+  <div class="row" style="margin-top:8px">
+    <input type="text" id="goto" placeholder="Aller à : latitude, longitude" spellcheck="false">
+    <button id="gotoBtn" style="flex:none">Aller</button>
+  </div>
+  <div class="zones" id="zones" style="margin-top:10px"></div>
+  <p class="hint" id="zonesHint">Cliquez sur « Dessiner un rectangle » puis glissez sur la carte, ou chargez la trace d'un parcours.</p>
+
+  <h2>Total</h2>
+  <div class="sum">
+    <div class="stat"><div class="v" id="tTiles">0</div><div class="k" id="tTilesK">tuiles</div></div>
+    <div class="stat"><div class="v" id="tSize">0 Mo</div><div class="k">sur la carte SD (128 Ko / tuile)</div></div>
+  </div>
+  <div class="note" id="osmWarn" style="display:none"></div>
+
+  <h2>Commandes</h2>
+  <p class="hint" style="margin-top:0">À lancer depuis la racine du dépôt (Python 3 + Pillow). Les tuiles originales sont gardées dans le cache.</p>
+  <div class="cmdhead"><span>1. Télécharger et convertir</span><button id="copy1" class="link">Copier</button></div>
+  <pre id="cmd1">—</pre>
+  <div class="cmdhead"><span>2. Reconvertir depuis le cache (sans réseau)</span><button id="copy2" class="link">Copier</button></div>
+  <pre id="cmd2">—</pre>
+  <p class="hint">La commande 2 écrase les .raw existants : à utiliser après un changement de thème ou de traitement.
+  Copiez ensuite le contenu du dossier de sortie à la racine de la carte SD.</p>
+</aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+
+// --- Calcul des tuiles : mêmes formules que tools/make_tiles.py ----------------------------
+const Z_ALL = [13, 14, 15, 16, 17];
+const SD_KB_PER_TILE = 128;          // 256*256*2 octets
+const OSM_SOFT_LIMIT = 400;          // plafond par défaut de make_tiles.py (--max-tiles)
+const COLORS = ["#2fa8e0", "#e07a2f", "#3fb56b", "#c455c9", "#d6b524", "#e0465a"];
+
+function deg2tile(lat, lon, z) {
+  const n = 2 ** z;
+  const x = Math.floor((lon + 180) / 360 * n);
+  const s = Math.sin(lat * Math.PI / 180);
+  const y = Math.floor((0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n);
+  return [Math.max(0, Math.min(n - 1, x)), Math.max(0, Math.min(n - 1, y))];
+}
+function bankers(v) {                 // round() de Python : arrondi au pair le plus proche
+  const f = Math.floor(v), d = v - f;
+  if (d < 0.5) return f;
+  if (d > 0.5) return f + 1;
+  return f % 2 === 0 ? f : f + 1;
+}
+function bboxRange(b, z) {            // b = [sud, ouest, nord, est]
+  const [x1, y1] = deg2tile(Math.max(b[0], b[2]), Math.min(b[1], b[3]), z);
+  const [x2, y2] = deg2tile(Math.min(b[0], b[2]), Math.max(b[1], b[3]), z);
+  return { x1, y1, x2, y2, count: Math.max(0, x2 - x1 + 1) * Math.max(0, y2 - y1 + 1) };
+}
+function trackTiles(pts, z, margin) { // renvoie un Set de clés x*2^z+y
+  const n = 2 ** z, s = new Set();
+  let prev = null;
+  for (const [lat, lon] of pts) {
+    const [x, y] = deg2tile(lat, lon, z);
+    const cells = [[x, y]];
+    if (prev) {
+      const [px, py] = prev;
+      const steps = Math.max(Math.abs(x - px), Math.abs(y - py));
+      for (let i = 1; i < steps; i++) cells.push([bankers(px + (x - px) * i / steps), bankers(py + (y - py) * i / steps)]);
+    }
+    prev = [x, y];
+    for (const [cx, cy] of cells)
+      for (let dx = -margin; dx <= margin; dx++)
+        for (let dy = -margin; dy <= margin; dy++) {
+          const tx = cx + dx, ty = cy + dy;
+          if (tx >= 0 && tx < n && ty >= 0 && ty < n) s.add(tx * n + ty);
+        }
+  }
+  return s;
+}
+
+// --- État ------------------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const zones = [];                     // {id, kind:'bbox'|'gpx', name, color, bounds|pts, margin, layer, counts:{z:n}}
+let nextId = 1;
+const activeZooms = new Set([13, 14, 15, 16, 17]);
+
+const fmt = n => n.toLocaleString("fr-FR");
+function fmtSize(tiles) {
+  const mo = tiles * SD_KB_PER_TILE / 1024;
+  return mo >= 1024 ? (mo / 1024).toLocaleString("fr-FR", { maximumFractionDigits: 2 }) + " Go"
+                    : mo.toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + " Mo";
+}
+const r5 = v => Math.round(v * 1e5) / 1e5;
+const zoomList = () => Z_ALL.filter(z => activeZooms.has(z));
+
+// --- Carte -----------------------------------------------------------------------------------
+let view = { c: [46.6, 2.5], z: 6 };
+try { const v = JSON.parse(localStorage.getItem("tm-view") || "null"); if (v && v.c) view = v; } catch (e) {}
+const map = L.map("map", { zoomControl: true }).setView(view.c, view.z);
+const base = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+}).addTo(map);
+let tileErrors = 0;
+base.on("tileerror", () => {
+  if (++tileErrors === 4) {
+    const b = $("banner"); b.style.display = "block";
+    b.firstElementChild.textContent = "Le fond de carte ne se charge pas. Si la page est ouverte depuis un fichier, servez-la en local : " +
+      "python3 -m http.server -d tools 8000, puis http://localhost:8000/tiles-manager.html";
+  }
+});
+map.on("moveend", () => { try { localStorage.setItem("tm-view", JSON.stringify({ c: [map.getCenter().lat, map.getCenter().lng], z: map.getZoom() })); } catch (e) {} });
+
+// --- Dessin de rectangles ----------------------------------------------------------------
+let drawing = false, startLL = null, tmpRect = null;
+function setDrawing(on) {
+  drawing = on;
+  $("draw").classList.toggle("on", on);
+  map.getContainer().classList.toggle("drawing", on);
+  if (on) map.dragging.disable(); else map.dragging.enable();
+  if (!on && tmpRect) { map.removeLayer(tmpRect); tmpRect = null; }
+  startLL = null;
+}
+$("draw").onclick = () => setDrawing(!drawing);
+document.addEventListener("keydown", e => { if (e.key === "Escape") setDrawing(false); });
+map.on("mousedown", e => {
+  if (!drawing) return;
+  startLL = e.latlng;
+  tmpRect = L.rectangle([startLL, startLL], { color: "#e0465a", weight: 2, dashArray: "4 4", fillOpacity: .1 }).addTo(map);
+});
+map.on("mousemove", e => { if (drawing && startLL) tmpRect.setBounds([startLL, e.latlng]); });
+map.on("mouseup", e => {
+  if (!drawing || !startLL) return;
+  const a = startLL, b = e.latlng;
+  setDrawing(false);
+  if (Math.abs(a.lat - b.lat) < 1e-5 || Math.abs(a.lng - b.lng) < 1e-5) return;   // simple clic : ignoré
+  addBBox([Math.min(a.lat, b.lat), Math.min(a.lng, b.lng), Math.max(a.lat, b.lat), Math.max(a.lng, b.lng)]);
+});
+
+function color() { return COLORS[(nextId - 1) % COLORS.length]; }
+function addBBox(bounds, name) {
+  bounds = bounds.map(r5);
+  const z = { id: nextId, kind: "bbox", name: name || "Zone " + nextId, color: color(), bounds, counts: {} };
+  nextId++;
+  z.layer = L.rectangle([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { color: z.color, weight: 2, fillOpacity: .12 }).addTo(map);
+  z.layer.bindTooltip(() => z.name, { sticky: true });
+  zones.push(z); refresh();
+}
+
+// --- GPX -----------------------------------------------------------------------------------
+$("gpxBtn").onclick = () => $("gpxFile").click();
+$("gpxFile").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  const doc = new DOMParser().parseFromString(await f.text(), "application/xml");
+  let pts = [];
+  for (const tag of ["trkpt", "rtept"]) {
+    pts = [...doc.getElementsByTagName(tag)].map(n => [parseFloat(n.getAttribute("lat")), parseFloat(n.getAttribute("lon"))])
+      .filter(p => isFinite(p[0]) && isFinite(p[1]));
+    if (pts.length >= 2) break;
+  }
+  if (pts.length < 2) { alert("GPX : moins de 2 points trouvés."); return; }
+  const z = { id: nextId, kind: "gpx", name: f.name, file: f.name, color: color(), pts, margin: 1, counts: {} };
+  nextId++;
+  z.layer = L.polyline(pts, { color: z.color, weight: 3 }).addTo(map);
+  z.layer.bindTooltip(() => z.name, { sticky: true });
+  map.fitBounds(z.layer.getBounds(), { padding: [30, 30] });
+  zones.push(z); refresh();
+};
+
+// --- Divers -----------------------------------------------------------------------------------
+$("clear").onclick = () => { zones.forEach(z => map.removeLayer(z.layer)); zones.length = 0; refresh(); };
+$("gotoBtn").onclick = gotoLL;
+$("goto").onkeydown = e => { if (e.key === "Enter") gotoLL(); };
+function gotoLL() {
+  const m = $("goto").value.match(/(-?\d+(?:[.,]\d+)?)\s*[,; ]\s*(-?\d+(?:[.,]\d+)?)/);
+  if (!m) return;
+  const lat = parseFloat(m[1].replace(",", ".")), lon = parseFloat(m[2].replace(",", "."));
+  if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) map.setView([lat, lon], Math.max(map.getZoom(), 13));
+}
+
+$("zooms").innerHTML = Z_ALL.map(z => `<label><input type="checkbox" data-z="${z}" checked> z${z}</label>`).join("");
+$("zooms").onchange = e => {
+  const z = +e.target.dataset.z;
+  if (e.target.checked) activeZooms.add(z); else activeZooms.delete(z);
+  refresh();
+};
+$("style").onchange = () => { $("customBox").style.display = $("style").value === "custom" ? "block" : "none"; refresh(); };
+["styleName", "styleUrl", "theme", "cache", "out"].forEach(id => $(id).oninput = refresh);
+
+// --- Calculs et affichage -------------------------------------------------------------------
+function zoneKeys(z, zm) {            // Set de clés de tuiles de la zone au zoom zm (pour l'union)
+  const n = 2 ** zm, s = new Set();
+  if (z.kind === "gpx") return trackTiles(z.pts, zm, z.margin);
+  const r = bboxRange(z.bounds, zm);
+  for (let x = r.x1; x <= r.x2; x++) for (let y = r.y1; y <= r.y2; y++) s.add(x * n + y);
+  return s;
+}
+function zoneCount(z, zm) {
+  if (z.kind === "bbox") return bboxRange(z.bounds, zm).count;
+  return trackTiles(z.pts, zm, z.margin).size;
+}
+
+function sq(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
+
+function commands() {
+  const zs = zoomList();
+  const custom = $("style").value === "custom";
+  const name = $("styleName").value.trim() || "mon-fond", url = $("styleUrl").value.trim();
+  const common = [];
+  if (zs.length) common.push("--zoom " + zs.join(" "));
+  if (custom) { common.push("--style " + sq(name)); common.push("--url " + sq(url || "https://exemple.org/{z}/{x}/{y}.png")); }
+  const cache = $("cache").value.trim();
+  if (cache && cache !== "tiles_src") common.push("--cache " + sq(cache));
+  common.push("--theme " + $("theme").value);
+  common.push("--out " + sq($("out").value.trim() || "sd/"));
+  const lines1 = [], lines2 = [];
+  for (const z of zones) {
+    let sel;
+    if (z.kind === "bbox") sel = "--bbox " + z.bounds.join(" ");
+    else sel = "--gpx " + sq(z.file) + (z.margin !== 1 ? " --margin " + z.margin : "");
+    const total = zs.reduce((a, zm) => a + (z.counts[zm] || 0), 0);
+    const cap = !custom && total > OSM_SOFT_LIMIT ? [" --max-tiles " + total] : [];
+    const head = "python3 tools/make_tiles.py " + sel + " " + common.join(" ");
+    lines1.push("# " + z.name + " (" + fmt(total) + " tuiles)\n" + head + cap.join(""));
+    lines2.push("# " + z.name + "\n" + head + " --offline --force");
+  }
+  return [lines1.join("\n"), lines2.join("\n")];
+}
+
+function refresh() {
+  const zs = zoomList();
+  // Comptes par zone
+  for (const z of zones) { z.counts = {}; for (const zm of zs) z.counts[zm] = zoneCount(z, zm); }
+  // Liste
+  $("zones").innerHTML = zones.map(z => {
+    const tot = zs.reduce((a, zm) => a + z.counts[zm], 0);
+    const per = zs.map(zm => `z${zm}: ${fmt(z.counts[zm])}`).join(" · ");
+    const where = z.kind === "bbox" ? `${z.bounds[0]}, ${z.bounds[1]} → ${z.bounds[2]}, ${z.bounds[3]}`
+      : `trace de ${fmt(z.pts.length)} points · <span class="mg">marge <input type="number" min="0" max="5" value="${z.margin}" data-m="${z.id}"> tuile(s)</span>`;
+    return `<div class="zone" style="--c:${z.color}" data-id="${z.id}">
+      <div class="top"><input type="text" value="${z.name.replace(/"/g, "&quot;")}" data-n="${z.id}" spellcheck="false">
+        <button class="link" data-f="${z.id}" title="Cadrer">⌖</button><button class="link" data-d="${z.id}" title="Supprimer">✕</button></div>
+      <div class="meta">${where}</div>
+      <div class="meta"><b>${fmt(tot)} tuiles</b> · ${fmtSize(tot)}${per ? " · " + per : ""}</div></div>`;
+  }).join("");
+  $("zonesHint").style.display = zones.length ? "none" : "block";
+
+  // Total : union exacte si c'est raisonnable, sinon somme
+  let sum = 0, union = 0, exact = true;
+  for (const z of zones) for (const zm of zs) sum += z.counts[zm];
+  if (zones.length > 1 && sum <= 400000) {
+    for (const zm of zs) { const u = new Set(); for (const z of zones) for (const k of zoneKeys(z, zm)) u.add(k); union += u.size; }
+  } else { union = sum; exact = zones.length <= 1; }
+  $("tTiles").textContent = fmt(union);
+  $("tTilesK").textContent = zones.length > 1 ? (exact ? "tuiles (sans doublons)" : "tuiles (recouvrements non déduits)") : "tuiles";
+  $("tSize").textContent = fmtSize(union);
+
+  const warn = $("osmWarn");
+  const osm = $("style").value === "osm";
+  const big = zones.filter(z => zs.reduce((a, zm) => a + z.counts[zm], 0) > OSM_SOFT_LIMIT);
+  if (osm && union > OSM_SOFT_LIMIT) {
+    warn.style.display = "block";
+    warn.textContent = "Au-delà de quelques centaines de tuiles, la politique d'usage du serveur OSM interdit le téléchargement massif. " +
+      "Réduisez la zone ou les zooms, ou choisissez un fournisseur qui l'autorise (« Autre fournisseur »)." +
+      (big.length ? " Le script exigera --max-tiles pour : " + big.map(z => z.name).join(", ") + "." : "");
+  } else warn.style.display = "none";
+
+  const [c1, c2] = commands();
+  const none = "— dessinez une zone ou chargez un GPX —";
+  $("cmd1").textContent = zones.length && zs.length ? c1 : (zones.length ? "— choisissez au moins un zoom —" : none);
+  $("cmd2").textContent = zones.length && zs.length ? c2 : (zones.length ? "— choisissez au moins un zoom —" : none);
+  save();
+}
+
+$("zones").addEventListener("input", e => {
+  const id = +(e.target.dataset.n || e.target.dataset.m || 0);
+  const z = zones.find(q => q.id === id);
+  if (!z) return;
+  if (e.target.dataset.n) { z.name = e.target.value; const [c1, c2] = commands(); $("cmd1").textContent = c1; $("cmd2").textContent = c2; save(); }
+  else if (e.target.dataset.m) { z.margin = Math.max(0, Math.min(5, parseInt(e.target.value, 10) || 0)); refreshKeepFocus(e.target); }
+});
+function refreshKeepFocus(el) {
+  const id = el.dataset.m, pos = el.selectionStart;
+  refresh();
+  const nel = document.querySelector(`[data-m="${id}"]`);
+  if (nel) { nel.focus(); }
+}
+$("zones").addEventListener("click", e => {
+  const d = e.target.closest("[data-d]"), f = e.target.closest("[data-f]");
+  if (d) {
+    const i = zones.findIndex(q => q.id === +d.dataset.d);
+    if (i >= 0) { map.removeLayer(zones[i].layer); zones.splice(i, 1); refresh(); }
+  } else if (f) {
+    const z = zones.find(q => q.id === +f.dataset.f);
+    if (z) map.fitBounds(z.layer.getBounds(), { padding: [40, 40] });
+  }
+});
+
+async function copy(id, btn) {
+  const t = $(id).textContent;
+  try { await navigator.clipboard.writeText(t); }
+  catch (e) { const r = document.createRange(); r.selectNodeContents($(id)); const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand("copy"); }
+  const old = btn.textContent; btn.textContent = "Copié"; setTimeout(() => btn.textContent = old, 1200);
+}
+$("copy1").onclick = e => copy("cmd1", e.target);
+$("copy2").onclick = e => copy("cmd2", e.target);
+
+// --- Mémorisation (rectangles et réglages ; les traces GPX ne sont pas gardées) --------------------
+function save() {
+  try {
+    localStorage.setItem("tm-state", JSON.stringify({
+      zones: zones.filter(z => z.kind === "bbox").map(z => ({ n: z.name, b: z.bounds })),
+      zooms: zoomList(), style: $("style").value, sn: $("styleName").value, su: $("styleUrl").value,
+      theme: $("theme").value, cache: $("cache").value, out: $("out").value
+    }));
+  } catch (e) {}
+}
+try {
+  const st = JSON.parse(localStorage.getItem("tm-state") || "null");
+  if (st) {
+    $("style").value = st.style || "osm"; $("styleName").value = st.sn || "mon-fond"; $("styleUrl").value = st.su || "";
+    $("theme").value = st.theme || "dark"; $("cache").value = st.cache || "tiles_src"; $("out").value = st.out || "sd/";
+    $("customBox").style.display = $("style").value === "custom" ? "block" : "none";
+    if (Array.isArray(st.zooms)) { activeZooms.clear(); st.zooms.forEach(z => activeZooms.add(z)); document.querySelectorAll("#zooms input").forEach(i => i.checked = activeZooms.has(+i.dataset.z)); }
+    (st.zones || []).forEach(z => addBBox(z.b, z.n));
+  }
+} catch (e) {}
+refresh();
+</script>
+</body>
+</html>

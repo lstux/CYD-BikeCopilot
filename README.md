@@ -54,16 +54,18 @@ La carte microSD (FAT32) contient :
 /route.gpx                  trace à suivre (optionnelle) ; son dernier point devient la destination
 ```
 
-Le script `tools/make_tiles.py` (Python + Pillow) produit ce dossier :
+Le script `tools/make_tiles.py` (Python + Pillow + numpy) produit ce dossier :
 
 ```
-pip install pillow
-python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/   # thème sombre par défaut, --theme light pour garder les couleurs OSM
+pip install pillow numpy
+python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/   # --theme dark (défaut) | light | osm
 # ou une zone : --bbox LAT1 LON1 LAT2 LON2
 # ou convertir des tuiles PNG déjà téléchargées : --png-dir dossier_png
 ```
 
 Puis copier le contenu de `sd/` à la racine de la carte. `--dry-run` compte les tuiles (et celles déjà en cache) sans rien faire.
+
+**Thèmes.** `dark` : fond presque noir, routes claires et hiérarchisées par couleur (rues bleu clair, secondaires jaunes, principales orange, autoroutes roses), bâtiments, eau et parcs en retrait, texte retravaillé. `light` : fond clair, routes sombres, pour le plein soleil. `osm` : couleurs d'origine. La recoloration reconnaît les couleurs standard d'OpenStreetMap ; avec un autre fournisseur, les couleurs inconnues sont simplement atténuées.
 
 **Tuiles originales.** Les PNG téléchargés sont gardés tels quels dans `tiles_src/<fond>/<z>/<x>/<y>.png` (`--cache`, `--style`) : une tuile n'est téléchargée qu'une fois. Pour changer de thème ou de traitement sans réseau :
 

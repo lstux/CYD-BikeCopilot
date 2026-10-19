@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Prépare les tuiles de carte pour la carte SD du CYD-BikeCopilot.
+Dépendances : pip install pillow numpy
 
 Sortie : <out>/tiles/<z>/<x>/<y>.raw  (256x256, RGB565 big-endian, 131072 octets)
          + copie optionnelle de la trace en <out>/route.gpx
@@ -37,7 +38,8 @@ import time
 import urllib.request
 from io import BytesIO
 
-from PIL import Image
+import numpy as np
+from PIL import Image, ImageFilter
 
 DEFAULT_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 
@@ -94,53 +96,166 @@ def tiles_for_bbox(lat1, lon1, lat2, lon2, z):
     return [(x, y) for x in range(x1, x2 + 1) for y in range(y1, y2 + 1)]
 
 
-# Thème sombre : courbe de luminance (entrée -> sortie), puis teinte bleutée ; eau et parcs gardent
-# une dominante bleue / verte. Le fond OSM (~242) devient #0A0F14, les routes blanches ~#26313D.
-_CURVE = [(0, 120), (90, 78), (170, 34), (205, 22), (236, 15), (244, 14), (250, 30), (255, 48)]
-_LUT = []
-for _l in range(256):
-    for (_a, _b), (_c, _d) in zip(_CURVE, _CURVE[1:]):
-        if _a <= _l <= _c:
-            _LUT.append(_b + (_d - _b) * (_l - _a) / max(1, _c - _a))
-            break
+# ---------------------------------------------------------------------------------------------
+# Recoloration des tuiles OSM (thèmes "dark" et "light"), pensée pour un petit écran TFT vu
+# sous des angles variables : fort contraste route / fond, hiérarchie des routes par couleur,
+# bâtiments / eau / parcs en retrait, texte lisible.
+#
+# Principe : une tuile OSM n'utilise qu'une trentaine de couleurs (+ leurs mélanges dus à
+# l'anti-crénelage). Chaque pixel est décrit comme un mélange de deux couleurs connues et
+# remplacé par le mélange des couleurs de sortie correspondantes. Le texte (noir avec halo blanc)
+# est traité à part : halo effacé, encre claire sur fond sombre (ou sombre sur une route claire).
+# Une couleur inconnue (pictogramme, style exotique) est simplement atténuée / inversée.
+# --theme osm : aucune recoloration (couleurs d'origine).
+# ---------------------------------------------------------------------------------------------
+def _hx(s):
+    return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))
 
 
-def dark_filter(img):
-    out = bytearray()
-    raw = img.tobytes()
-    for k in range(0, len(raw), 3):
-        r, g, b = raw[k], raw[k + 1], raw[k + 2]
-        lum = (r * 299 + g * 587 + b * 114) // 1000
-        v = _LUT[lum]
-        if b - r > 22 and b >= g - 4 and lum > 150:  # eau
-            rr, gg, bb = v * 0.55, v * 1.05, v * 1.6
-        elif g - r > 18 and g > b and lum > 150:  # parcs, bois
-            rr, gg, bb = v * 0.7, v * 1.25, v * 0.95
-        else:
-            rr, gg, bb = v * 0.85, v * 1.0, v * 1.1
-        out += bytes((min(255, int(rr)), min(255, int(gg)), min(255, int(bb))))
-    return Image.frombytes("RGB", img.size, bytes(out))
+# (couleur OSM d'origine, couleur de sortie)
+_DARK = [
+    ("f2efe9", "0b1017"), ("e0dfdf", "0e141c"), ("eef0d5", "0d151a"), ("ebdbe8", "141320"),   # sols
+    ("f2dad9", "161320"), ("ffd6d1", "181320"), ("f0f0d8", "0f161b"), ("ffffe5", "0f161b"),
+    ("cdebb0", "0f2a20"), ("c8facc", "10301f"), ("add19e", "0d3322"), ("c8d7ab", "112a1f"),   # herbe, parcs, bois
+    ("aad3df", "0c2a55"),                                                                     # eau
+    ("d9d0c9", "1b232d"), ("c2b5aa", "34424f"), ("d1c6bd", "27323d"),                         # bâtiments
+    ("ffffff", "a5c4d8"), ("fefefe", "a5c4d8"), ("eeeeee", "5f7587"), ("bbbbbb", "5a7080"),   # rues
+    ("f7fabe", "ffe58a"), ("fcd6a4", "ffbd5e"), ("f9b29c", "ff8a63"), ("e892a2", "ff6f98"),   # secondaires -> autoroutes
+    ("dc2a67", "9a3a5a"), ("c84e2f", "98513a"), ("a06b00", "8f6a2a"), ("a7a574", "8a8650"),   # liserés
+    ("8f8f8f", "4d6272"),
+    ("fa8072", "b87c72"), ("0000ff", "5c9bff"), ("0092da", "3fb0f0"), ("808080", "6d8294"),   # chemins, pistes, pictos, rails
+    ("000000", "ecf3f9"),                                                                     # texte
+]
+_LIGHT = [
+    ("f2efe9", "ecedf0"), ("e0dfdf", "e0e3e8"), ("eef0d5", "e9ede6"), ("ebdbe8", "e4dfe8"),
+    ("f2dad9", "eadfe0"), ("ffd6d1", "ecdcdc"), ("f0f0d8", "e8ebe3"), ("ffffe5", "e8ebe3"),
+    ("cdebb0", "c4e0bd"), ("c8facc", "bfe8c4"), ("add19e", "a8cfa2"), ("c8d7ab", "c6d9b0"),
+    ("aad3df", "8cc0ea"),
+    ("d9d0c9", "bfc4cc"), ("c2b5aa", "8d96a3"), ("d1c6bd", "aab0ba"),
+    ("ffffff", "27506f"), ("fefefe", "27506f"), ("eeeeee", "a4b0bc"), ("bbbbbb", "7d8c9a"),
+    ("f7fabe", "d6a800"), ("fcd6a4", "ee8a12"), ("f9b29c", "dc4a2c"), ("e892a2", "c8205f"),
+    ("dc2a67", "7a1238"), ("c84e2f", "7e2c1a"), ("a06b00", "6e4800"), ("a7a574", "6e6a30"),
+    ("8f8f8f", "566472"),
+    ("fa8072", "d0604f"), ("0000ff", "2450e0"), ("0092da", "0a78c0"), ("808080", "50606e"),
+    ("000000", "0c121a"),
+]
+# fond, encre sur fond, encre sur route, repli pour couleur inconnue : L' = a + b*(100-L) (sombre) ou a + b*L (clair)
+_THEMES = {
+    "dark": dict(anchors=_DARK, bg=(11, 16, 23), ink_bg=(236, 243, 249), ink_road=(8, 14, 22), fb=(18, 0.38, True)),
+    "light": dict(anchors=_LIGHT, bg=(236, 238, 240), ink_bg=(12, 18, 26), ink_road=(246, 249, 251), fb=(8, 0.9, False)),
+}
+_CACHE = {}
+
+_M = np.array([[0.4124564, 0.3575761, 0.1804375], [0.2126729, 0.7151522, 0.0721750], [0.0193339, 0.1191920, 0.9503041]])
+_WP = np.array([0.95047, 1.0, 1.08883])
+
+
+def _rgb2lab(rgb):
+    c = rgb / 255.0
+    c = np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92)
+    xyz = (c @ _M.T) / _WP
+    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
+    return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
+
+
+def _lab2rgb(lab):
+    fy = (lab[..., 0] + 16) / 116
+    f = np.stack([fy + lab[..., 1] / 500, fy, fy - lab[..., 2] / 200], -1)
+    xyz = np.where(f ** 3 > 0.008856, f ** 3, (f - 16 / 116) / 7.787) * _WP
+    c = xyz @ np.linalg.inv(_M).T
+    c = np.where(c > 0.0031308, 1.055 * np.clip(c, 0, None) ** (1 / 2.4) - 0.055, 12.92 * c)
+    return np.clip(c * 255 + 0.5, 0, 255)
+
+
+def _boxf(a, k):
+    """Moyenne glissante k x k (k impair), bords répliqués."""
+    r = k // 2
+    c = np.pad(np.pad(a.astype(float), r, mode="edge").cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    h, w = a.shape
+    return (c[k:k + h, k:k + w] - c[:h, k:k + w] - c[k:k + h, :w] + c[:h, :w]) / (k * k)
+
+
+def _mf(mask, size, mode="max"):
+    im = Image.fromarray((mask * 255).astype(np.uint8))
+    return np.asarray(im.filter(ImageFilter.MaxFilter(size) if mode == "max" else ImageFilter.MinFilter(size))) > 127
+
+
+def _recolor(src, th):
+    """src : (h, w, 3) float. Chaque couleur est projetée sur le segment le plus proche entre deux
+    couleurs d'origine connues, puis remplacée par le mélange des couleurs de sortie."""
+    h, w, _ = src.shape
+    uniq, inv = np.unique(src.reshape(-1, 3), axis=0, return_inverse=True)
+    inv = inv.reshape(-1)
+    A = np.array([_hx(x) for x, _ in th["anchors"]], float)
+    T = np.array([_hx(y) for _, y in th["anchors"]], float)
+    best = np.full(len(uniq), 1e9)
+    res = np.zeros(len(uniq))
+    out = np.zeros_like(uniq)
+    for i in range(len(A)):
+        for j in range(i, len(A)):
+            if i == j:
+                t = np.zeros(len(uniq))
+                q = np.broadcast_to(A[i], uniq.shape)
+                pen = 0.0
+            else:
+                d = A[j] - A[i]
+                l2 = float(d @ d)
+                t = np.clip(((uniq - A[i]) @ d) / l2, 0, 1)
+                q = A[i] + t[:, None] * d
+                pen = 0.02 * np.sqrt(l2)
+            r = np.sqrt(((uniq - q) ** 2).sum(1))
+            m = (r + pen) < best
+            if m.any():
+                best[m] = (r + pen)[m]
+                res[m] = r[m]
+                out[m] = T[i] + t[m, None] * (T[j] - T[i])
+    lab = _rgb2lab(uniq)
+    off, slope, inv_l = th["fb"]
+    lab[:, 0] = off + slope * (100 - lab[:, 0]) if inv_l else off + slope * lab[:, 0]
+    lab[:, 1:] *= 0.55
+    alpha = np.clip(1 - (res - 5.0) / 12.0, 0, 1)[:, None]
+    return np.clip(alpha * out + (1 - alpha) * _lab2rgb(lab), 0, 255)[inv].reshape(h, w, 3)
+
+
+def recolor_tile(img, z, theme):
+    th = _THEMES[theme]
+    src = np.asarray(img.convert("RGB"), float)
+    out = _recolor(src, th)
+    lum = src @ np.array([0.299, 0.587, 0.114])
+    neutral = (src.max(-1) - src.min(-1)) < 24
+    ink = neutral & (lum < 110)                         # texte
+    white = neutral & (lum > 236)                       # route, halo...
+    if z >= 16:
+        core = _mf(_mf(white, 5, "min"), 5, "max")      # routes larges seulement (les halos font 1-2 px)
+    elif z == 15:
+        core = _mf(_mf(white & ~_mf(ink, 3), 3, "min"), 3, "max")
+    else:
+        core = np.zeros_like(white)
+    zone = _mf(ink, 5)                                  # texte + halo
+    if zone.any():
+        keep = (~zone).astype(float)
+        num = np.stack([_boxf(out[..., c] * keep, 9) for c in range(3)], -1)
+        den = _boxf(keep, 9)[..., None]
+        local = np.where(den > 0.04, num / np.maximum(den, 1e-3), np.array(th["bg"], float))
+        base = np.where((zone & ~core)[..., None], local, out)       # halo effacé hors des routes
+        on_road = (_boxf(core.astype(float), 9) > 0.25)[..., None]
+        color = np.where(on_road, np.array(th["ink_road"], float), np.array(th["ink_bg"], float))
+        a = np.clip((238 - lum) / 200.0, 0, 1)[..., None]            # 0 = halo / fond, 1 = encre
+        out = np.where(zone[..., None], base * (1 - a) + color * a, out)
+    return np.clip(out + 0.5, 0, 255).astype(np.uint8)
 
 
 THEME = "dark"
 
 
-def to_rgb565_be(img):
+def to_rgb565_be(img, z=16):
     img = img.convert("RGB")
     if img.size != (256, 256):
         img = img.resize((256, 256), Image.LANCZOS)
-    if THEME == "dark":
-        img = dark_filter(img)
-    out = bytearray(256 * 256 * 2)
-    i = 0
-    raw = img.tobytes()
-    for k in range(0, len(raw), 3):
-        r, g, b = raw[k], raw[k + 1], raw[k + 2]
-        v = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-        out[i] = v >> 8
-        out[i + 1] = v & 0xFF
-        i += 2
-    return bytes(out)
+    a = np.asarray(img) if THEME == "osm" else recolor_tile(img, z, THEME)
+    a = a.astype(np.uint16)
+    v = ((a[..., 0] & 0xF8) << 8) | ((a[..., 1] & 0xFC) << 3) | (a[..., 2] >> 3)
+    return v.astype(">u2").tobytes()
 
 
 def fetch(url, ua):
@@ -165,7 +280,8 @@ def main():
     ap.add_argument("--user-agent", default="CYD-BikeCopilot-tiles/1.0 (usage personnel)")
     ap.add_argument("--delay", type=float, default=0.6, help="secondes entre deux requêtes")
     ap.add_argument("--max-tiles", type=int, default=400, help="plafond de tuiles à télécharger")
-    ap.add_argument("--theme", choices=("dark", "light"), default="dark", help="thème de la carte (déf. dark)")
+    ap.add_argument("--theme", choices=("dark", "light", "osm"), default="dark",
+                    help="dark = fond sombre ; light = fond clair, routes foncées (plein soleil) ; osm = couleurs d'origine")
     ap.add_argument("--dry-run", action="store_true", help="compter les tuiles sans rien faire")
     a = ap.parse_args()
     global THEME
@@ -231,7 +347,7 @@ def main():
                 time.sleep(a.delay)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             with open(dst, "wb") as f:
-                f.write(to_rgb565_be(img))
+                f.write(to_rgb565_be(img, z))
             done += 1
         except Exception as e:  # noqa: BLE001
             failed += 1

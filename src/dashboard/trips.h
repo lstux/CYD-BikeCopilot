@@ -278,6 +278,21 @@ static bool tripDelete(const char *name) {
   return SD.rename(tmp, TRIP_INDEX);  // en cas d'échec, l'index est reconstruit au prochain démarrage
 }
 
+// Dernier point valide d'un trajet (fin du trajet)
+static bool tripLastPoint(const char *path, double &la, double &lo) {
+  bool ok = false;
+  forEachLine(path, [&](const char *l) {
+    double t, a, b;
+    float alt, kmh;
+    if (parseRow(l, t, a, b, alt, kmh)) {
+      la = a;
+      lo = b;
+      ok = true;
+    }
+  });
+  return ok;
+}
+
 // Ajoute à l'index les fichiers .csv qui n'y figurent pas (coupure de courant pendant un trajet)
 static void tripsRebuildIndex() {
   File dir = SD.open(TRIP_DIR);

@@ -127,4 +127,37 @@ static void tileUpdate(const Surf &scr, int x, const char *value, uint16_t value
   text(c, FONT_M9, x + 5, TILE_Y + 56, sub2, col::TER);
 }
 
+// --- menu « Destination » (ouvert en touchant la case DEST) ----------------------------------
+static const int DMENU_X = 76, DMENU_Y = 40, DMENU_W = 168, DMENU_HEAD = 26, DMENU_ROW = 34;
+static const int DMENU_H = DMENU_HEAD + 4 * DMENU_ROW + 6;
+static const char *DMENU_LABELS[4] = {"Automatique", "Domicile", "Fin de la trace GPX", "Fin du dernier trajet"};
+
+struct DestMenuState {
+  int active = -1;                           // ligne cochée (-1 : aucune, p. ex. point choisi sur la carte)
+  bool en[4] = {true, false, false, false};  // lignes utilisables
+  const char *cur = "";                      // source actuelle, en haut à droite
+};
+
+static void drawDestMenu(const gfx::Surf &s, const DestMenuState &m) {
+  using namespace gfx;
+  card(s, DMENU_X, DMENU_Y, DMENU_W, DMENU_H, 12, col::CARD, col::ACCENT);
+  Surf c = withBg(s, col::CARD);
+  text(c, FONT_S9, DMENU_X + 12, DMENU_Y + 16, "DESTINATION", col::SEC, AL_L, 1);
+  text(c, FONT_M9, DMENU_X + DMENU_W - 12, DMENU_Y + 16, m.cur, col::ACCENT, AL_R);
+  for (int i = 0; i < 4; i++) {
+    int ry = DMENU_Y + DMENU_HEAD + i * DMENU_ROW;
+    if (i > 0) hline(s, DMENU_X + 12, ry, DMENU_W - 24, col::BORDER);
+    disc(s, DMENU_X + 17, ry + 17, 4.0f, i == m.active ? col::ACCENT : col::DOT);
+    text(c, FONT_S13, DMENU_X + 30, ry + 22, DMENU_LABELS[i], m.en[i] ? col::TXT : col::TER, AL_L);
+  }
+}
+
+// -1 : hors du menu (le fermer), -2 : en-tête, 0..3 : ligne
+static int destMenuHit(int x, int y) {
+  if (x < DMENU_X || x >= DMENU_X + DMENU_W || y < DMENU_Y || y >= DMENU_Y + DMENU_H) return -1;
+  if (y < DMENU_Y + DMENU_HEAD) return -2;
+  int r = (y - DMENU_Y - DMENU_HEAD) / DMENU_ROW;
+  return r < 4 ? r : -2;
+}
+
 }  // namespace pg_compass

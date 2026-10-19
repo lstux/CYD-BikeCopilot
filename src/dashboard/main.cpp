@@ -48,7 +48,15 @@ static const int NB_PAGES = 5;  // 0 compteur, 1 direction, 2 carte, 3 trajets, 
 
 // Destination : dernier point de la trace GPX si elle existe, sinon celle de config.h
 double destLat = 0, destLon = 0;
-bool destValid = false;  // destination connue : fin de la trace GPX, sinon position « Domicile »
+bool destValid = false;  // destination connue (voir updateDestination)
+// Dernière position avec fix (RAM seulement) : centre de la carte quand le GPS ne répond plus
+bool lastFixOk = false;
+double lastFixLat = 0, lastFixLon = 0;
+// Menu « Destination » (page Direction) et fenêtre d'appui long (page Carte)
+bool destMenuOpen = false;
+bool mapPopOpen = false;
+int mapPopX = 0, mapPopY = 0;
+double mapPopLat = 0, mapPopLon = 0;
 
 static float currentKmh();
 static void pollGps() {
@@ -86,21 +94,75 @@ static float etaSpeedKmh() {
 
 #include "mappage.h"
 
+static void setDestPoint(double la, double lo) {
+  destLat = la;
+  destLon = lo;
+  destValid = true;
+}
+
+// Destination : choix explicite (cfg.destMode) si disponible, sinon automatique (trace, puis domicile)
 static void updateDestination() {
-  if (track.valid()) {
-    destLat = track.destLat();
-    destLon = track.destLon();
-    destValid = true;
-  } else if (cfg.homeOk) {
-    destLat = cfg.homeLat;
-    destLon = cfg.homeLon;
-    destValid = true;
-  } else {
-    destValid = false;
+  bool home = cfg.homeOk, trk = track.valid(), pt = cfg.pointOk;
+  int m = cfg.destMode;
+  if (m == DM_POINT && pt) setDestPoint(cfg.pointLat, cfg.pointLon);
+  else if (m == DM_HOME && home) setDestPoint(cfg.homeLat, cfg.homeLon);
+  else if (m == DM_TRACK && trk) setDestPoint(track.destLat(), track.destLon());
+  else if (trk) setDestPoint(track.destLat(), track.destLon());
+  else if (home) setDestPoint(cfg.homeLat, cfg.homeLon);
+  else destValid = false;
+}
+
+static void chooseDest(int mode, double la = 0, double lo = 0) {
+  cfg.destMode = mode;
+  if (mode == DM_POINT) {
+    cfg.pointOk = true;
+    cfg.pointLat = la;
+    cfg.pointLon = lo;
   }
+  cfg.save();
+  updateDestination();
+}
+
+static void setHome(double la, double lo) {
+  cfg.homeOk = true;
+  cfg.homeLat = la;
+  cfg.homeLon = lo;
+  cfg.save();
+  updateDestination();
 }
 #include "histpage.h"
 #include "settingspage.h"
+
+// --- Menu « Destination » (page Direction) ----------------------------------------------------
+static void openDestMenu() {
+  if (sdOk) histN = indexLoad(hist, HIST_MAX);
+  pg_compass::DestMenuState st;
+  st.active = cfg.destMode == DM_POINT ? -1 : cfg.destMode;
+  st.en[0] = true;
+  st.en[1] = cfg.homeOk;
+  st.en[2] = track.valid();
+  st.en[3] = histN > 0;
+  static const char *names[4] = {"auto", "domicile", "trace GPX", "point choisi"};
+  st.cur = names[cfg.destMode];
+  pg_compass::drawDestMenu(scr(), st);
+  destMenuOpen = true;
+}
+
+static void applyDestMenu(int r) {
+  switch (r) {
+    case 0: chooseDest(DM_AUTO); break;
+    case 1: if (cfg.homeOk) chooseDest(DM_HOME); break;
+    case 2: if (track.valid()) chooseDest(DM_TRACK); break;
+    case 3:
+      if (histN > 0) {  // fin du dernier trajet enregistré
+        char p[64];
+        double la, lo;
+        tripPath(hist[histN - 1].name, p, sizeof(p));
+        if (tripLastPoint(p, la, lo)) chooseDest(DM_POINT, la, lo);
+      }
+      break;
+  }
+}
 
 // --- Vitesse filtrée (anti-dérive GPS à l'arrêt) ---
 static float speedKmh = 0;
@@ -459,11 +521,39 @@ static void handleTouch() {
   TouchEvent e = touch.poll(millis());
   if (e == TE_NONE) return;
   if (e == TE_DRAG) {
-    if (page == 2) mapDrag(touch.dx, touch.dy);
+    if (page == 2) {
+      mapPopOpen = false;
+      mapDrag(touch.dx, touch.dy);
+    }
     else if (page == 3) {
       if (histSel >= 0) histCursorAt(touch.curX());
       else histDrag(touch.dy);
     }
+    return;
+  }
+  if (destMenuOpen) {  // menu Destination : une ligne le valide, tout autre toucher le ferme
+    if (e == TE_TAP) {
+      int r = pg_compass::destMenuHit(touch.x, touch.y);
+      if (r != -2) {
+        destMenuOpen = false;
+        pageDirty = true;
+        if (r >= 0) applyDestMenu(r);
+      }
+    }
+    return;
+  }
+  if (mapPopOpen) {  // fenêtre d'appui long sur la carte
+    if (e == TE_TAP) {
+      int a = popHit(mapPopX, mapPopY, touch.x, touch.y);
+      mapPopOpen = false;
+      mapForce = true;
+      if (a == 1) chooseDest(DM_POINT, mapPopLat, mapPopLon);
+      else if (a == 2) setHome(mapPopLat, mapPopLon);
+    }
+    return;
+  }
+  if (page == 1 && e == TE_TAP && touch.x >= 251 && touch.y >= 80 && touch.y <= 140) {  // case DEST
+    openDestMenu();
     return;
   }
   if (modalReset) {
@@ -517,6 +607,12 @@ static void handleTouch() {
       if (page <= 1) {
         modalReset = true;
         drawResetModal();
+      } else if (page == 2) {  // appui long sur la carte : destination ou domicile ici
+        mapPopOpen = true;
+        mapPopX = touch.x;
+        mapPopY = touch.y;
+        mapScreenToLatLon(touch.x, touch.y, mapPopLat, mapPopLon);
+        mapForce = true;
       }
       break;
     default:
@@ -570,6 +666,8 @@ static void handleButton() {
 // =====================================================================
 static void enterPage() {
   modalReset = false;
+  destMenuOpen = false;
+  mapPopOpen = false;
   tft.fillScreen(col::BG);
   frameForce = true;
   if (page == 0) {
@@ -628,7 +726,7 @@ static void renderFrame(uint32_t now) {
 }
 
 static void renderSlow() {
-  if (page != 2 || !sdOk || noFixShown) drawStatusBar();
+  if (page != 2 || !sdOk) drawStatusBar();
   if (page == 0) drawStats();
   else if (page == 1) drawDirectionTiles();
   else if (page == 4) settingsRefresh();
@@ -677,6 +775,11 @@ void loop() {
   static uint32_t lastFrame = 0, lastSlow = 0, lastCompass = 0;
 
   while (Serial2.available()) gps.encode(Serial2.read());
+  if (gps.location.isValid() && gps.location.age() < 3000) {  // mémorise la dernière position connue
+    lastFixOk = true;
+    lastFixLat = gps.location.lat();
+    lastFixLon = gps.location.lng();
+  }
   updateSpeed(millis());
   updateTrip();
   updateLogger(millis());
@@ -692,7 +795,7 @@ void loop() {
     enterPage();
     renderSlow();
   }
-  if (modalReset) return;  // fenêtre de confirmation : on ne redessine pas dessous
+  if (modalReset || destMenuOpen) return;  // fenêtre de confirmation : on ne redessine pas dessous
   if (now - lastFrame >= 40) {  // ~25 images/s
     lastFrame = now;
     renderFrame(now);

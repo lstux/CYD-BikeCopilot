@@ -70,6 +70,8 @@ class Track {
   int count() const { return n_; }
   double destLat() const { return lat_[n_ - 1]; }
   double destLon() const { return lon_[n_ - 1]; }
+  double midLat() const { return lat_[n_ / 2]; }
+  double midLon() const { return lon_[n_ / 2]; }
   float totalM() const { return n_ ? cum_[n_ - 1] : 0; }
   float remainingM() const { return totalM() - along_; }
   float offRouteM() const { return off_; }

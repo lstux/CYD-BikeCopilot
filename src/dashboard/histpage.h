@@ -16,6 +16,7 @@ static int histCursor = -1;  // colonne du curseur dans les courbes, -1 si absen
 static int histAcc = 0;      // glissé vertical accumulé (pixels)
 static bool histSprOk = false;
 static bool histConfirm = false;  // fenêtre « Supprimer ce trajet ? » affichée
+static bool histDestSet = false;  // destination fixée depuis ce détail
 
 static uint32_t histNowEpoch() {
   if (gps.date.isValid() && gps.time.isValid() && gps.date.year() >= 2024)
@@ -85,7 +86,7 @@ static void drawHistDetail() {
   using namespace pg_trips;
   Surf s = scr();
   clearContent(s);
-  drawDetailHeader(s, histCur, cfg.tz);
+  drawDetailHeader(s, histCur, cfg.tz, histDestSet);
   drawDetailTiles(s, histCur);
   hud::pageDots(s, 3, NB_PAGES);
   spr.deleteSprite();
@@ -124,6 +125,7 @@ static void histOpen(int rank) {
   char path[64];
   tripPath(t.name, path, sizeof(path));
   histCur = t;
+  histDestSet = false;
   if (tripAnalyze(path, histCur, &histSer)) {
     histSel = rank;
     drawHistDetail();
@@ -181,6 +183,15 @@ static bool histTap(int x, int y) {
       if (x >= 236) {
         histConfirm = true;
         drawConfirmDelete(scr());
+      } else if (x >= 166) {  // « Destination » : fin de ce trajet
+        char p[64];
+        double la, lo;
+        tripPath(histCur.name, p, sizeof(p));
+        if (tripLastPoint(p, la, lo)) {
+          chooseDest(DM_POINT, la, lo);
+          histDestSet = true;
+          drawDetailHeader(scr(), histCur, cfg.tz, true);
+        }
       } else {
         histBack();  // en-tête : retour à la liste
       }

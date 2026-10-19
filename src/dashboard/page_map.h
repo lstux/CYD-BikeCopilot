@@ -20,6 +20,9 @@ static Seg vis[MAX_VIS];
 static int nVis = 0;
 
 // Données de l'image en cours (calculées avant le dessin des bandes)
+// Source du centre de la carte
+enum MapSrc { CS_LIVE, CS_LAST, CS_HOME, CS_TRACK, CS_TILES };
+
 struct MapView {
   int z;
   int spd;
@@ -36,6 +39,9 @@ struct MapView {
   int scalePx, scaleM;  // longueur de l'échelle
   char scaleTxt[10];
   hud::Status st;
+  bool fix = false, markerOn = false, popOpen = false;
+  int src = 0, popX = 0, popY = 0;
+  const char *srcName = "";
 };
 
 // Distance en deux morceaux (valeur, unité)
@@ -88,6 +94,25 @@ static void mapPlusMinus(const Surf &s, int x, int y, bool plus, bool enabled) {
   if (plus) line(s, x + 15.5f, y + 10, x + 15.5f, y + 21, 1.8f, c);
 }
 
+// Fenêtre d'appui long sur la carte : « Destination ici » / « Domicile ici » / « Annuler »
+static const int POP_W = 156, POP_H = 98, POP_ROW = 30;
+static void popOrigin(int px, int py, int &x, int &y) {
+  x = px - POP_W / 2;
+  if (x < 8) x = 8;
+  if (x > 320 - 8 - POP_W) x = 320 - 8 - POP_W;
+  y = py - POP_H - 14;
+  if (y < 26) y = py + 14;
+  if (y + POP_H > 236) y = 236 - POP_H;
+}
+// 1 : destination ici, 2 : domicile ici, 0 : annuler ou toucher à côté
+static int popHit(int px, int py, int x, int y) {
+  int ox, oy;
+  popOrigin(px, py, ox, oy);
+  if (x < ox || x >= ox + POP_W || y < oy + 6 || y >= oy + POP_H) return 0;
+  int r = (y - oy - 6) / POP_ROW;
+  return r == 0 ? 1 : (r == 1 ? 2 : 0);
+}
+
 static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoomIdx, int nPages) {
   Surf S = onSprite(band, 0, by);
 
@@ -121,17 +146,18 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
   }
 
   // Position : halo, disque blanc cerclé de bleu, pointe orientée selon le cap (nord en haut)
-  if (inBand(by, v.posY - 16, v.posY + 16)) {
-    disc(S, v.posX, v.posY, 13.0f, col::ACCENT, 46);
+  if (v.markerOn && inBand(by, v.posY - 16, v.posY + 16)) {
+    disc(S, v.posX, v.posY, 13.0f, v.fix ? col::ACCENT : col::DOT, 46);
     disc(S, v.posX, v.posY, 7.5f, col::TXT);
-    circle(S, v.posX, v.posY, 6.8f, 1.6f, MAP_BLUE);
+    circle(S, v.posX, v.posY, 6.8f, 1.6f, v.fix ? MAP_BLUE : col::SEC);
+    uint16_t pc = v.fix ? MAP_BLUE : col::SEC;
     float a = v.heading * 0.017453292f, ca = cosf(a), sa = sinf(a);
     auto R = [&](float px_, float py_, float &ox, float &oy) { ox = v.posX + px_ * ca - py_ * sa; oy = v.posY + px_ * sa + py_ * ca; };
     float xs[3], ys[3];
     R(0, -8, xs[0], ys[0]); R(4, 1, xs[1], ys[1]); R(0, -1, xs[2], ys[2]);
-    polygon(S, xs, ys, 3, MAP_BLUE);
+    polygon(S, xs, ys, 3, pc);
     R(0, -8, xs[0], ys[0]); R(-4, 1, xs[1], ys[1]); R(0, -1, xs[2], ys[2]);
-    polygon(S, xs, ys, 3, MAP_BLUE);
+    polygon(S, xs, ys, 3, pc);
   }
 
   // Voile en haut pour la lisibilité de la barre d'état
@@ -149,7 +175,8 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
   // Vitesse
   if (inBand(by, 26, 59)) {
     char b[8];
-    snprintf(b, sizeof(b), "%d", v.spd);
+    if (v.spd < 0) snprintf(b, sizeof(b), "--");
+    else snprintf(b, sizeof(b), "%d", v.spd);
     int w1 = textWidth(FONT_B30, b, -1), w2 = textWidth(FONT_M10, "km/h");
     card(S, 5, 27, w1 + w2 + 26, 32, 9, col::CARD, col::BORDER);
     text(S, FONT_B30, 13, 51, b, col::TXT, AL_L, -1);
@@ -203,7 +230,15 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
   if (inBand(by, 182, 224)) {
     card(S, 5, 182, 310, 41, 11, col::CARD, col::BORDER);
     const float icx = 25.5f, icy = 202.5f;
-    if (!v.hasTrack) {
+    if (!v.fix) {
+      disc(S, icx, icy, 14.5f, col::DOT);
+      circle(S, icx, icy, 6.0f, 1.6f, col::AMBER);
+      disc(S, icx, icy, 2.0f, col::AMBER);
+      text(S, FONT_B17, 47, 206, "GPS en recherche", col::AMBER);
+      char g[48];
+      snprintf(g, sizeof(g), "centrée sur %s", v.srcName);
+      text(S, FONT_M10, 47, 218, g, col::SEC);
+    } else if (!v.hasTrack) {
       disc(S, icx, icy, 14.5f, col::DOT);
       text(S, FONT_B17, 47, 208, "Pas de trace", col::SEC);
     } else if (!v.onTrack) {
@@ -232,6 +267,17 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
     text(S, FONT_M10, 311, 217, b, col::SEC, AL_R);
   }
 
+  if (v.popOpen) {
+    int x0, y0;
+    popOrigin(v.popX, v.popY, x0, y0);
+    card(S, x0, y0, POP_W, POP_H, 10, col::CARD, col::ACCENT);
+    Surf c = withBg(S, col::CARD);
+    text(c, FONT_S13, x0 + POP_W / 2, y0 + 26, "Destination ici", col::ACCENT, AL_C);
+    hline(S, x0 + 12, y0 + 36, POP_W - 24, col::BORDER);
+    text(c, FONT_S13, x0 + POP_W / 2, y0 + 56, "Domicile ici", col::TXT, AL_C);
+    hline(S, x0 + 12, y0 + 66, POP_W - 24, col::BORDER);
+    text(c, FONT_S13, x0 + POP_W / 2, y0 + 86, "Annuler", col::SEC, AL_C);
+  }
   if (by >= 220) hud::pageDots(S, 2, nPages, false);
 }
 

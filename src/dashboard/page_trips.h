@@ -93,7 +93,7 @@ static void drawEmpty(const Surf &s, bool sd) {
 }
 
 // --- détail --------------------------------------------------------------------------------
-static void drawDetailHeader(const Surf &s, const TripSummary &t, int tz) {
+static void drawDetailHeader(const Surf &s, const TripSummary &t, int tz, bool destSet = false) {
   rect(s, 0, 21, 320, 24, col::BG);
   disc(s, 17, 33, 11.5f, col::BORDER);
   disc(s, 17, 33, 10.5f, col::CARD);
@@ -102,6 +102,8 @@ static void drawDetailHeader(const Surf &s, const TripSummary &t, int tz) {
   char a[40];
   fmtDateLong(t.t0, tz, a, sizeof(a));
   text(s, FONT_S13, 36, 38, a, col::TXT);
+  card(s, 166, 24, 70, 20, 8, col::CARD, col::BORDER);
+  text(withBg(s, col::CARD), FONT_S9, 201, 38, destSet ? "Fixée" : "Destination", destSet ? col::OK : col::ACCENT, AL_C);
   card(s, 244, 24, 71, 20, 8, col::CARD, col::BORDER);
   text(withBg(s, col::CARD), FONT_S11, 279, 38, "Supprimer", col::RED, AL_C);
 }

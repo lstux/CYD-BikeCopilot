@@ -28,6 +28,7 @@ static int projZ = -1;
 static bool mapForce = true;
 static bool noFixShown = false;
 static int32_t lastOx = 0, lastOy = 0;
+static int lastZ = 0;
 static uint32_t lastMapMs = 0;
 static char lastKey[128];
 static float lastHeading = 0;
@@ -109,6 +110,98 @@ static void mapEnter() {
   }
 }
 
+static const char *baseOf(const char *p) {
+  const char *b = strrchr(p, '/');
+  return b ? b + 1 : p;
+}
+
+// Centre géographique des tuiles présentes au zoom 16 (calculé une seule fois)
+static bool tilesCenter(double &lat, double &lon) {
+  static int state = 0;  // 0 : pas encore calculé, 1 : trouvé, 2 : absent
+  static double clat = 0, clon = 0;
+  if (state == 0) {
+    state = 2;
+    if (!sdOk) return false;
+    File d = SD.open("/tiles/16");
+    if (!d) return false;
+    int minX = 1 << 30, maxX = -1, minY = 1 << 30, maxY = -1;
+    File e = d.openNextFile();
+    while (e) {
+      if (e.isDirectory()) {
+        int x = atoi(baseOf(e.name()));
+        File f = e.openNextFile();
+        while (f) {
+          int y = atoi(baseOf(f.name()));
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+          f.close();
+          f = e.openNextFile();
+        }
+      }
+      e.close();
+      e = d.openNextFile();
+    }
+    d.close();
+    if (maxX < 0) return false;
+    const double n = 65536.0;  // 2^16
+    double cx = (minX + maxX + 1) / 2.0, cy = (minY + maxY + 1) / 2.0;
+    clon = cx / n * 360.0 - 180.0;
+    clat = atan(sinh(M_PI * (1.0 - 2.0 * cy / n))) * 180.0 / M_PI;
+    state = 1;
+  }
+  if (state != 1) return false;
+  lat = clat;
+  lon = clon;
+  return true;
+}
+
+// Centre de la carte sans fix : dernière position (RAM), domicile, milieu de la trace, tuiles
+static bool mapCenter(double &lat, double &lon, int &src) {
+  if (lastFixOk) {
+    lat = lastFixLat;
+    lon = lastFixLon;
+    src = CS_LAST;
+    return true;
+  }
+  if (cfg.homeOk) {
+    lat = cfg.homeLat;
+    lon = cfg.homeLon;
+    src = CS_HOME;
+    return true;
+  }
+  if (track.valid()) {
+    lat = track.midLat();
+    lon = track.midLon();
+    src = CS_TRACK;
+    return true;
+  }
+  if (tilesCenter(lat, lon)) {
+    src = CS_TILES;
+    return true;
+  }
+  return false;
+}
+
+static const char *mapSrcName(int s) {
+  switch (s) {
+    case CS_LAST: return "la dernière position connue";
+    case CS_HOME: return "le domicile";
+    case CS_TRACK: return "le milieu de la trace";
+    case CS_TILES: return "les tuiles de la SD";
+    default: return "position";
+  }
+}
+
+// Coordonnées géographiques d'un point de l'écran (pour l'appui long)
+static void mapScreenToLatLon(int x, int y, double &lat, double &lon) {
+  double n = 256.0 * (double)(1UL << lastZ);
+  double wx = lastOx + x, wy = lastOy + (y - MAP_Y0);
+  lon = wx / n * 360.0 - 180.0;
+  lat = atan(sinh(M_PI * (1.0 - 2.0 * wy / n))) * 180.0 / M_PI;
+}
+
 static void renderMapPage(uint32_t now) {
   if (!sdOk) {
     if (mapForce) {
@@ -118,30 +211,38 @@ static void renderMapPage(uint32_t now) {
     return;
   }
   bool fix = gps.location.isValid() && gps.location.age() < 3000;
-  if (!fix) {
+  double clat = 0, clon = 0;
+  int src = CS_LIVE;
+  if (fix) {
+    clat = gps.location.lat();
+    clon = gps.location.lng();
+    noFixShown = false;
+  } else if (!mapCenter(clat, clon, src)) {
     if (!noFixShown) {
-      mapMessage("En attente du fix GPS", col::AMBER);
+      mapMessage("Aucune position connue", col::AMBER);
       noFixShown = true;
       mapForce = true;
     }
     return;
   }
-  noFixShown = false;
   if (now - lastMapMs < 300) return;
-  if (mapPanned() && now - lastPanMs > 20000) mapRecenter();  // retour automatique sur la position
+  if (mapPanned() && now - lastPanMs > 20000) mapRecenter();  // retour automatique sur le centre
 
   const int z = MAP_ZOOMS[mapZoomIdx];
-  double lat = gps.location.lat(), lon = gps.location.lng();
   double wxd, wyd;
-  worldPx(lat, lon, z, wxd, wyd);
+  worldPx(clat, clon, z, wxd, wyd);
   int32_t ox = (int32_t)floor(wxd + panX) - MAP_CX;
   int32_t oy = (int32_t)floor(wyd + panY) - MAP_CY;
 
   float kmh = currentKmh();
   MapView v;
   memset(&v, 0, sizeof(v));
+  v.fix = fix;
+  v.src = src;
+  v.markerOn = fix || src == CS_LAST;
+  v.srcName = mapSrcName(src);
   v.z = z;
-  v.spd = (int)(kmh + 0.5f);
+  v.spd = fix ? (int)(kmh + 0.5f) : -1;
   v.heading = navHeading(kmh);
   v.hasDest = destValid;
   v.posX = (int)(wxd - ox);
@@ -149,22 +250,34 @@ static void renderMapPage(uint32_t now) {
   v.canIn = mapNextZoom(+1) >= 0;
   v.canOut = mapNextZoom(-1) >= 0;
   v.panned = mapPanned();
+  v.popOpen = mapPopOpen;
+  v.popX = mapPopX;
+  v.popY = mapPopY;
   v.hasTrack = track.valid();
-  if (v.hasTrack) {
-    float off = track.follow(lat, lon);
-    v.onTrack = off < 60.0f;
-    v.remain = track.remainingM();
-    if (v.onTrack) v.hasTurn = track.nextTurn(v.turnD, v.turnA);
-  } else if (destValid) {
-    v.remain = (float)TinyGPSPlus::distanceBetween(lat, lon, destLat, destLon);
+  bool haveRemain = false;
+  if (fix) {
+    if (v.hasTrack) {
+      float off = track.follow(clat, clon);
+      v.onTrack = off < 60.0f;
+      v.remain = track.remainingM();
+      if (v.onTrack) v.hasTurn = track.nextTurn(v.turnD, v.turnA);
+      haveRemain = true;
+    } else if (destValid) {
+      v.remain = (float)TinyGPSPlus::distanceBetween(clat, clon, destLat, destLon);
+      haveRemain = true;
+    }
   }
   splitDist(v.turnNum, sizeof(v.turnNum), v.turnUnit, v.turnD);
-  if (v.hasTrack || destValid) splitDist(v.remNum, sizeof(v.remNum), v.remUnit, v.remain);
-  else { strcpy(v.remNum, "--"); v.remUnit[0] = 0; }
+  if (haveRemain) {
+    splitDist(v.remNum, sizeof(v.remNum), v.remUnit, v.remain);
+  } else {
+    strcpy(v.remNum, "--");
+    v.remUnit[0] = 0;
+  }
   v.st = currentStatus();
   {  // heure d'arrivée estimée
     int mins = (int)(v.remain / 1000.0f / etaSpeedKmh() * 60.0f + 0.5f);
-    if (gps.time.isValid() && (v.hasTrack || destValid)) {
+    if (haveRemain && gps.time.isValid()) {
       int t = ((gps.time.hour() + cfg.tz + 24) % 24) * 60 + gps.time.minute() + mins;
       snprintf(v.eta, sizeof(v.eta), "%02d:%02d", (t / 60) % 24, t % 60);
     } else {
@@ -172,7 +285,7 @@ static void renderMapPage(uint32_t now) {
     }
   }
   {  // échelle : plus grande longueur « ronde » qui tient dans 72 px
-    float mpp = 156543.034f * cosf((float)lat * 0.017453292f) / (float)(1 << z);
+    float mpp = 156543.034f * cosf((float)clat * 0.017453292f) / (float)(1 << z);
     static const int NICE[] = {10, 20, 50, 100, 200, 500, 1000, 2000, 5000};
     v.scaleM = NICE[0];
     for (int n : NICE) if (n / mpp <= 72.0f) v.scaleM = n;
@@ -183,15 +296,17 @@ static void renderMapPage(uint32_t now) {
 
   // Faut-il redessiner ?
   char key[128];
-  snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s%s|%s%s|%s|%s|%d%d%d|%d|%d|%d|%d", v.spd, z, (int)(v.heading / 8), v.onTrack,
-           v.hasTurn, v.turnNum, v.turnUnit, v.remNum, v.remUnit, v.eta, v.st.clock, v.st.sats, v.st.fix, v.st.rec,
-           (int)v.turnA / 10, (int)panX, (int)panY, v.homeVisible);
+  snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s%s|%s%s|%s|%s|%d%d%d|%d|%d|%d|%d|%d%d%d", v.spd, z,
+           (int)(v.heading / 8), v.onTrack, v.hasTurn, v.turnNum, v.turnUnit, v.remNum, v.remUnit, v.eta,
+           v.st.clock, v.st.sats, v.st.fix, v.st.rec, (int)v.turnA / 10, (int)panX, (int)panY, v.homeVisible,
+           fix, src, (int)v.popOpen);
   bool moved = labs((long)(ox - lastOx)) >= 2 || labs((long)(oy - lastOy)) >= 2;
   if (!mapForce && !moved && strcmp(key, lastKey) == 0) return;
   strncpy(lastKey, key, sizeof(lastKey) - 1);
   lastKey[sizeof(lastKey) - 1] = 0;
   lastOx = ox;
   lastOy = oy;
+  lastZ = z;
   lastMapMs = now;
   mapForce = false;
 
@@ -215,14 +330,12 @@ static void renderMapPage(uint32_t now) {
   double dx, dy;
   worldPx(destLat, destLon, z, dx, dy);
   int32_t dsx = (int32_t)dx - ox, dsy = (int32_t)dy - oy + MAP_Y0;
-  {  // domicile
-    if (cfg.homeOk) {
-      double hx, hy;
-      worldPx(cfg.homeLat, cfg.homeLon, z, hx, hy);
-      v.homeX = (int)((int32_t)hx - ox);
-      v.homeY = (int)((int32_t)hy - oy) + MAP_Y0;
-      v.homeVisible = v.homeX > -12 && v.homeX < 332 && v.homeY > -12 && v.homeY < 252;
-    }
+  if (cfg.homeOk) {  // domicile
+    double hx, hy;
+    worldPx(cfg.homeLat, cfg.homeLon, z, hx, hy);
+    v.homeX = (int)((int32_t)hx - ox);
+    v.homeY = (int)((int32_t)hy - oy) + MAP_Y0;
+    v.homeVisible = v.homeX > -12 && v.homeX < 332 && v.homeY > -12 && v.homeY < 252;
   }
   v.destVisible = dsx > -12 && dsx < 332 && dsy > MAP_Y0 - 12 && dsy < 252;
   v.dsx = (int)dsx;

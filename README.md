@@ -67,7 +67,14 @@ Puis copier le contenu de `sd/` à la racine de la carte. `--dry-run` compte les
 Le téléchargement est plafonné (`--max-tiles`) : la [politique des serveurs OSM](https://operations.osmfoundation.org/policies/tiles/) interdit le téléchargement massif ; pour une grande zone, utiliser un autre fournisseur ou `--png-dir`.
 Sans `route.gpx`, la carte s'affiche quand même, centrée sur la position.
 
-**Destination** (page Direction, distance restante et heure d'arrivée) : dernier point de `route.gpx` s'il existe, sinon la position « Domicile », sinon aucune. Pour enregistrer le domicile : page Réglages → *Domicile* → *Définir ici* (il faut un fix GPS). Une icône de maison le marque sur la carte.
+**Destination** (page Direction : distance, cap et arrivée ; page Carte : trait rouge et distance restante). Par défaut (*automatique*) : fin de `route.gpx` s'il existe, sinon le domicile. On peut la changer de trois façons :
+- en touchant la case **DEST** de la page Direction : menu Automatique / Domicile / Fin de la trace / Fin du dernier trajet ;
+- par un **appui long sur la carte** : « Destination ici » ou « Domicile ici » ;
+- dans le détail d'un trajet (page Trajets) : bouton **Destination** (fin de ce trajet).
+
+Le domicile se définit dans Réglages → *Domicile* → *Définir ici* (fix GPS requis), ou par appui long sur la carte. Le choix est mémorisé en flash.
+
+**Page carte** : glisser un doigt pour déplacer la vue (depuis les bords gauche/droit, un glissé change de page), bouton cible pour recentrer (retour automatique après 20 s), boutons + / − pour le zoom (5 niveaux, grisés si les tuiles du niveau manquent sur la SD). Sans fix GPS, la carte se centre sur la dernière position connue (en RAM, perdue au redémarrage), puis sur le domicile, le milieu de la trace ou le centre des tuiles présentes. Pour dézoomer plus loin, générer des niveaux supplémentaires : `--zoom 13 14 15 16 17`.
 
 **Page carte** : glisser un doigt pour déplacer la vue (depuis les bords gauche/droit, un glissé change de page), bouton cible pour recentrer (retour automatique après 20 s), boutons + / − pour le zoom (5 niveaux, grisés si les tuiles du niveau manquent sur la SD ; appui long = zoom suivant). Pour dézoomer plus loin, générer des niveaux supplémentaires : `--zoom 13 14 15 16 17`.
 

@@ -50,7 +50,8 @@ L'échelle part de 15 km/h. Dès que la vitesse la dépasse, elle passe au palie
 La carte microSD (FAT32) contient :
 
 ```
-/tiles/<zoom>/<x>/<y>.raw   tuiles 256×256 en RGB565 (131072 octets), zooms 13 à 17 (ceux présents sur la SD)
+/tiles_dark/<zoom>/<x>/<y>.raw    tuiles du thème sombre, 256×256 en RGB565 (131072 octets), zooms 13 à 17 (ceux présents sur la SD)
+/tiles_light/<zoom>/<x>/<y>.raw   les mêmes tuiles en thème clair (plein soleil)
 /route.gpx                  trace à suivre (optionnelle) ; son dernier point devient la destination
 ```
 
@@ -58,14 +59,16 @@ Le script `tools/make_tiles.py` (Python + Pillow + numpy) produit ce dossier :
 
 ```
 pip install pillow numpy
-python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/   # --theme dark (défaut) | light | osm
+python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/   # écrit sd/tiles_dark et sd/tiles_light ; --theme dark | light | osm, un ou plusieurs
 # ou une zone : --bbox LAT1 LON1 LAT2 LON2
 # ou convertir des tuiles PNG déjà téléchargées : --png-dir dossier_png
 ```
 
 Puis copier le contenu de `sd/` à la racine de la carte. `--dry-run` compte les tuiles (et celles déjà en cache) sans rien faire.
 
-**Thèmes.** `dark` : fond presque noir, routes claires et hiérarchisées par couleur (rues bleu clair, secondaires jaunes, principales orange, autoroutes roses), bâtiments, eau et parcs en retrait, texte retravaillé. `light` : fond clair, routes sombres, pour le plein soleil. `osm` : couleurs d'origine. La recoloration reconnaît les couleurs standard d'OpenStreetMap ; avec un autre fournisseur, les couleurs inconnues sont simplement atténuées.
+**Thèmes.** `dark` : fond presque noir, routes claires et hiérarchisées par couleur (rues bleu clair, secondaires jaunes, principales orange, autoroutes roses), bâtiments, eau et parcs en retrait, texte retravaillé. `light` : fond clair, routes sombres, pour le plein soleil. `osm` : couleurs d'origine (dossier `tiles_osm`, non lu par le firmware). Un dossier par thème, les deux premiers par défaut : `--theme dark light` ne lit chaque original qu'une fois. La recoloration reconnaît les couleurs standard d'OpenStreetMap ; avec un autre fournisseur, les couleurs inconnues sont simplement atténuées.
+
+**Thème de la carte (Réglages : Auto / Sombre / Clair).** Le firmware lit `/tiles_dark` ou `/tiles_light` ; s'il n'y a qu'un des deux, il utilise celui-là, et à défaut l'ancien `/tiles`. En mode **Auto**, la photorésistance du CYD (IO34) choisit, avec hystérésis et une durée minimale (`LDR_*` dans `config.h`). Selon les cartes, le capteur est inversé, mal étalonné, ou éclairé par le rétroéclairage : la valeur lue (`lum.`) s'affiche dans Réglages en mode Auto, il suffit d'y régler `LDR_INVERT`, `LDR_LIGHT_ON` et `LDR_LIGHT_OFF` d'après ce qu'on y lit en plein jour et à l'ombre. Les éléments posés sur la carte (trace, échelle, destination) changent aussi de couleurs avec le thème.
 
 **Tuiles originales.** Les PNG téléchargés sont gardés tels quels dans `tiles_src/<fond>/<z>/<x>/<y>.png` (`--cache`, `--style`) : une tuile n'est téléchargée qu'une fois. Pour changer de thème ou de traitement sans réseau :
 

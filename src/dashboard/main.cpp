@@ -92,6 +92,7 @@ static float etaSpeedKmh() {
   return v < 5.0f ? 5.0f : v;
 }
 
+#include "maptheme.h"
 #include "mappage.h"
 
 static void setDestPoint(double la, double lo) {
@@ -583,7 +584,7 @@ static void handleTouch() {
     if (a == SA_CALIB_TOUCH) touchCalibrate();
     if (a == SA_RESET_COMPASS) {
       compass.resetCalibration();
-      settingsSetNote(5, "tournez la carte sur elle-même");
+      settingsSetNote(6, "tournez la carte sur elle-même");
       drawSettingsRow(5);
     }
     return;
@@ -791,6 +792,10 @@ void loop() {
   handleTouch();
 
   uint32_t now = millis();
+  if (mapThemeUpdate(now)) {  // thème de la carte changé (réglage ou luminosité) : autres tuiles
+    Serial.printf("Thème de la carte : %s (lum. %d)\n", mapLight ? "clair" : "sombre", ldrRaw);
+    mapUseTheme(mapLight);
+  }
   if (pageDirty) {
     enterPage();
     renderSlow();

@@ -41,6 +41,15 @@
 #define GAUGE_DOWN_MS     8000  // durée sous le palier inférieur avant de redescendre d'un cran
 #define GAUGE_DOWN_RATIO  0.8   // "nettement sous" = moins de 80 % du palier inférieur
 
+// --- Luminosité ambiante : photorésistance du CYD (IO34), pour le thème « Auto » de la carte ---
+// Les valeurs dépendent de la carte : la lecture lissée est affichée dans Réglages (ligne
+// « Thème de la carte », en mode Auto) ; ajustez LDR_INVERT et les seuils d'après ce qu'on y lit.
+#define LDR_PIN         34
+#define LDR_INVERT      0     // 0 : valeur élevée = clair ; 1 : valeur élevée = sombre
+#define LDR_LIGHT_ON    1200  // passe au thème clair au-dessus de ce seuil (échelle 0-4095 après inversion)
+#define LDR_LIGHT_OFF   700   // revient au thème sombre en dessous (hystérésis)
+#define LDR_HOLD_MS     3000  // durée pendant laquelle le nouveau seuil doit être tenu avant de changer
+
 // --- Carte SD et carte routière ---
 #define SD_CS_PIN     5
 #define SD_SCK_PIN    18

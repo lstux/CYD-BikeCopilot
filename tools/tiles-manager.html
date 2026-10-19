@@ -96,8 +96,12 @@ pre { margin: 6px 0 0; padding: 10px; background: var(--code); color: var(--code
     <input type="text" id="styleUrl" placeholder="https://exemple.org/{z}/{x}/{y}.png" spellcheck="false">
   </div>
   <div class="row">
-    <div><label for="theme">Thème de conversion</label>
-      <select id="theme"><option value="dark">Sombre</option><option value="light">Clair (plein soleil)</option><option value="osm">Couleurs d'origine</option></select></div>
+    <div><label>Thèmes (un dossier chacun)</label>
+      <div class="zooms" id="themes">
+        <label title="sd/tiles_dark"><input type="checkbox" data-t="dark" checked> Sombre</label>
+        <label title="sd/tiles_light"><input type="checkbox" data-t="light" checked> Clair</label>
+        <label title="sd/tiles_osm : non lu par le firmware"><input type="checkbox" data-t="osm"> OSM</label>
+      </div></div>
     <div><label for="cache">Cache des originales</label><input type="text" id="cache" value="tiles_src" spellcheck="false"></div>
     <div><label for="out">Dossier de sortie</label><input type="text" id="out" value="sd/" spellcheck="false"></div>
   </div>
@@ -122,7 +126,7 @@ pre { margin: 6px 0 0; padding: 10px; background: var(--code); color: var(--code
   <h2>Total</h2>
   <div class="sum">
     <div class="stat"><div class="v" id="tTiles">0</div><div class="k" id="tTilesK">tuiles</div></div>
-    <div class="stat"><div class="v" id="tSize">0 Mo</div><div class="k">sur la carte SD (128 Ko / tuile)</div></div>
+    <div class="stat"><div class="v" id="tSize">0 Mo</div><div class="k">sur la carte SD (128 Ko par tuile et par thème)</div></div>
   </div>
   <div class="note" id="osmWarn" style="display:none"></div>
 
@@ -293,7 +297,9 @@ $("zooms").onchange = e => {
   refresh();
 };
 $("style").onchange = () => { $("customBox").style.display = $("style").value === "custom" ? "block" : "none"; refresh(); };
-["styleName", "styleUrl", "theme", "cache", "out"].forEach(id => $(id).oninput = refresh);
+["styleName", "styleUrl", "cache", "out"].forEach(id => $(id).oninput = refresh);
+$("themes").onchange = refresh;
+const themeList = () => ["dark", "light", "osm"].filter(t => document.querySelector(`#themes [data-t="${t}"]`).checked);
 
 // --- Calculs et affichage -------------------------------------------------------------------
 function zoneKeys(z, zm) {            // Set de clés de tuiles de la zone au zoom zm (pour l'union)
@@ -319,7 +325,8 @@ function commands() {
   if (custom) { common.push("--style " + sq(name)); common.push("--url " + sq(url || "https://exemple.org/{z}/{x}/{y}.png")); }
   const cache = $("cache").value.trim();
   if (cache && cache !== "tiles_src") common.push("--cache " + sq(cache));
-  common.push("--theme " + $("theme").value);
+  const th = themeList();
+  if (th.join(" ") !== "dark light") common.push("--theme " + (th.join(" ") || "dark"));
   common.push("--out " + sq($("out").value.trim() || "sd/"));
   const lines1 = [], lines2 = [];
   for (const z of zones) {
@@ -349,7 +356,7 @@ function refresh() {
       <div class="top"><input type="text" value="${z.name.replace(/"/g, "&quot;")}" data-n="${z.id}" spellcheck="false">
         <button class="link" data-f="${z.id}" title="Cadrer">⌖</button><button class="link" data-d="${z.id}" title="Supprimer">✕</button></div>
       <div class="meta">${where}</div>
-      <div class="meta"><b>${fmt(tot)} tuiles</b> · ${fmtSize(tot)}${per ? " · " + per : ""}</div></div>`;
+      <div class="meta"><b>${fmt(tot)} tuiles</b> · ${fmtSize(tot * Math.max(1, themeList().length))}${per ? " · " + per : ""}</div></div>`;
   }).join("");
   $("zonesHint").style.display = zones.length ? "none" : "block";
 
@@ -361,7 +368,7 @@ function refresh() {
   } else { union = sum; exact = zones.length <= 1; }
   $("tTiles").textContent = fmt(union);
   $("tTilesK").textContent = zones.length > 1 ? (exact ? "tuiles (sans doublons)" : "tuiles (recouvrements non déduits)") : "tuiles";
-  $("tSize").textContent = fmtSize(union);
+  $("tSize").textContent = fmtSize(union * Math.max(1, themeList().length));
 
   const warn = $("osmWarn");
   const osm = $("style").value === "osm";
@@ -419,7 +426,7 @@ function save() {
     localStorage.setItem("tm-state", JSON.stringify({
       zones: zones.filter(z => z.kind === "bbox").map(z => ({ n: z.name, b: z.bounds })),
       zooms: zoomList(), style: $("style").value, sn: $("styleName").value, su: $("styleUrl").value,
-      theme: $("theme").value, cache: $("cache").value, out: $("out").value
+      themes: themeList(), cache: $("cache").value, out: $("out").value
     }));
   } catch (e) {}
 }
@@ -427,7 +434,7 @@ try {
   const st = JSON.parse(localStorage.getItem("tm-state") || "null");
   if (st) {
     $("style").value = st.style || "osm"; $("styleName").value = st.sn || "mon-fond"; $("styleUrl").value = st.su || "";
-    $("theme").value = st.theme || "dark"; $("cache").value = st.cache || "tiles_src"; $("out").value = st.out || "sd/";
+    if (Array.isArray(st.themes)) document.querySelectorAll("#themes input").forEach(i => i.checked = st.themes.includes(i.dataset.t)); $("cache").value = st.cache || "tiles_src"; $("out").value = st.out || "sd/";
     $("customBox").style.display = $("style").value === "custom" ? "block" : "none";
     if (Array.isArray(st.zooms)) { activeZooms.clear(); st.zooms.forEach(z => activeZooms.add(z)); document.querySelectorAll("#zooms input").forEach(i => i.checked = activeZooms.has(+i.dataset.z)); }
     (st.zones || []).forEach(z => addBBox(z.b, z.n));

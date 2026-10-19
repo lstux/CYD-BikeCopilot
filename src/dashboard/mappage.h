@@ -21,6 +21,8 @@ SPIClass sdSPI(VSPI);
 bool sdOk = false;
 
 static int mapZoomIdx = 3;
+static bool mapShownLight = false;  // les tuiles affichées sont-elles celles du thème clair ?
+static int tcState = 0;             // centre des tuiles : 0 pas encore calculé, 1 trouvé, 2 absent
 static bool zoomAvail[5] = {false, false, true, true, true};
 static float panX = 0, panY = 0;  // décalage de la vue par rapport à la position (pixels au zoom courant)
 static uint32_t lastPanMs = 0;
@@ -89,25 +91,39 @@ static void mapRecenter() {
   mapForce = true;
 }
 
+// Choisit le dossier de tuiles : celui du thème demandé, sinon l'autre thème, sinon l'ancien /tiles ;
+// puis regarde quels zooms il contient.
+static void mapUseTheme(bool light) {
+  if (!sdOk) return;
+  const char *want = light ? "/tiles_light" : "/tiles_dark";
+  const char *other = light ? "/tiles_dark" : "/tiles_light";
+  const char *d = SD.exists(want) ? want : (SD.exists(other) ? other : "/tiles");
+  if (strcmp(d, tiles.dir()) != 0) {
+    tiles.setDir(d);
+    tcState = 0;
+  }
+  mapShownLight = strcmp(d, "/tiles_light") == 0;
+  for (int i = 0; i < 5; i++) {
+    char z[24];
+    snprintf(z, sizeof(z), "%s/%d", d, MAP_ZOOMS[i]);
+    zoomAvail[i] = SD.exists(z);
+  }
+  if (!zoomAvail[mapZoomIdx]) {
+    int best = -1;
+    for (int i = 0; i < 5; i++)
+      if (zoomAvail[i] && (best < 0 || abs(i - 3) < abs(best - 3))) best = i;
+    if (best >= 0) mapZoomIdx = best;
+  }
+  mapForce = true;
+}
+
 static void mapEnter() {
   mapForce = true;
   noFixShown = false;
   lastKey[0] = 0;
   lastMapMs = 0;
   panX = panY = 0;
-  if (sdOk) {  // quels zooms sont présents sur la carte SD ?
-    for (int i = 0; i < 5; i++) {
-      char d[16];
-      snprintf(d, sizeof(d), "/tiles/%d", MAP_ZOOMS[i]);
-      zoomAvail[i] = SD.exists(d);
-    }
-    if (!zoomAvail[mapZoomIdx]) {
-      int best = -1;
-      for (int i = 0; i < 5; i++)
-        if (zoomAvail[i] && (best < 0 || abs(i - 3) < abs(best - 3))) best = i;
-      if (best >= 0) mapZoomIdx = best;
-    }
-  }
+  mapUseTheme(mapLight);
 }
 
 static const char *baseOf(const char *p) {
@@ -117,12 +133,13 @@ static const char *baseOf(const char *p) {
 
 // Centre géographique des tuiles présentes au zoom 16 (calculé une seule fois)
 static bool tilesCenter(double &lat, double &lon) {
-  static int state = 0;  // 0 : pas encore calculé, 1 : trouvé, 2 : absent
   static double clat = 0, clon = 0;
-  if (state == 0) {
-    state = 2;
+  if (tcState == 0) {
+    tcState = 2;
     if (!sdOk) return false;
-    File d = SD.open("/tiles/16");
+    char dir16[24];
+    snprintf(dir16, sizeof(dir16), "%s/16", tiles.dir());
+    File d = SD.open(dir16);
     if (!d) return false;
     int minX = 1 << 30, maxX = -1, minY = 1 << 30, maxY = -1;
     File e = d.openNextFile();
@@ -149,9 +166,9 @@ static bool tilesCenter(double &lat, double &lon) {
     double cx = (minX + maxX + 1) / 2.0, cy = (minY + maxY + 1) / 2.0;
     clon = cx / n * 360.0 - 180.0;
     clat = atan(sinh(M_PI * (1.0 - 2.0 * cy / n))) * 180.0 / M_PI;
-    state = 1;
+    tcState = 1;
   }
-  if (state != 1) return false;
+  if (tcState != 1) return false;
   lat = clat;
   lon = clon;
   return true;
@@ -238,6 +255,7 @@ static void renderMapPage(uint32_t now) {
   MapView v;
   memset(&v, 0, sizeof(v));
   v.fix = fix;
+  v.light = mapShownLight;
   v.src = src;
   v.markerOn = fix || src == CS_LAST;
   v.srcName = mapSrcName(src);
@@ -300,6 +318,7 @@ static void renderMapPage(uint32_t now) {
            (int)(v.heading / 8), v.onTrack, v.hasTurn, v.turnNum, v.turnUnit, v.remNum, v.remUnit, v.eta,
            v.st.clock, v.st.sats, v.st.fix, v.st.rec, (int)v.turnA / 10, (int)panX, (int)panY, v.homeVisible,
            fix, src, (int)v.popOpen);
+  // (le changement de thème force le redessin : voir mapUseTheme)
   bool moved = labs((long)(ox - lastOx)) >= 2 || labs((long)(oy - lastOy)) >= 2;
   if (!mapForce && !moved && strcmp(key, lastKey) == 0) return;
   strncpy(lastKey, key, sizeof(lastKey) - 1);
@@ -345,7 +364,7 @@ static void renderMapPage(uint32_t now) {
   uint8_t *buf = (uint8_t *)band.getPointer();
   for (int b = 0; b < MAP_H / BAND_H; b++) {
     const int by = MAP_Y0 + b * BAND_H;
-    band.fillSprite(MAP_BG);
+    band.fillSprite(v.light ? MAP_BG_LIGHT : MAP_BG);
     for (int r = 0; r < BAND_H; r++) {
       int32_t wyp = oy + b * BAND_H + r;
       int32_t ty = wyp >> 8;

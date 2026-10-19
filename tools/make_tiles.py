@@ -2,13 +2,16 @@
 """Prépare les tuiles de carte pour la carte SD du CYD-BikeCopilot.
 Dépendances : pip install pillow numpy
 
-Sortie : <out>/tiles/<z>/<x>/<y>.raw  (256x256, RGB565 big-endian, 131072 octets)
+Sortie : <out>/tiles_<thème>/<z>/<x>/<y>.raw  (256x256, RGB565 big-endian, 131072 octets)
+         un dossier par thème : tiles_dark, tiles_light (ou tiles_osm), lus par le firmware selon le
+         thème de la carte (Réglages : Auto / Sombre / Clair)
          + copie optionnelle de la trace en <out>/route.gpx
 
 Les tuiles ORIGINALES (PNG) sont conservées dans un cache :
   <cache>/<style>/<z>/<x>/<y>.png     (par défaut tiles_src/osm/...)
 Une tuile n'est donc téléchargée qu'une seule fois ; on peut ensuite changer de thème ou de
 traitement et reconvertir sans réseau (--offline), en écrasant les anciens .raw (--force).
+Plusieurs thèmes en un seul passage : --theme dark light (les originales ne sont lues qu'une fois).
 
 Sources de tuiles :
   (défaut)        cache puis téléchargement (serveur OSM, {z}/{x}/{y})
@@ -23,7 +26,7 @@ de tuiles À TÉLÉCHARGER (celles déjà dans le cache ne comptent pas).
 Exemples :
   python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/
   python3 tools/make_tiles.py --bbox 48.84 2.28 48.87 2.33 --zoom 16 --out sd/
-  python3 tools/make_tiles.py --bbox 48.84 2.28 48.87 2.33 --zoom 16 --out sd/ --offline --force --theme light
+  python3 tools/make_tiles.py --bbox 48.84 2.28 48.87 2.33 --zoom 16 --out sd/ --offline --force --theme dark light
   python3 tools/make_tiles.py --png-dir mes_tuiles_png --zoom 16 --out sd/
 
 La page tools/tiles-manager.html aide à choisir les zones et génère ces commandes.
@@ -245,14 +248,11 @@ def recolor_tile(img, z, theme):
     return np.clip(out + 0.5, 0, 255).astype(np.uint8)
 
 
-THEME = "dark"
-
-
-def to_rgb565_be(img, z=16):
+def to_rgb565_be(img, z, theme):
     img = img.convert("RGB")
     if img.size != (256, 256):
         img = img.resize((256, 256), Image.LANCZOS)
-    a = np.asarray(img) if THEME == "osm" else recolor_tile(img, z, THEME)
+    a = np.asarray(img) if theme == "osm" else recolor_tile(img, z, theme)
     a = a.astype(np.uint16)
     v = ((a[..., 0] & 0xF8) << 8) | ((a[..., 1] & 0xFC) << 3) | (a[..., 2] >> 3)
     return v.astype(">u2").tobytes()
@@ -280,12 +280,12 @@ def main():
     ap.add_argument("--user-agent", default="CYD-BikeCopilot-tiles/1.0 (usage personnel)")
     ap.add_argument("--delay", type=float, default=0.6, help="secondes entre deux requêtes")
     ap.add_argument("--max-tiles", type=int, default=400, help="plafond de tuiles à télécharger")
-    ap.add_argument("--theme", choices=("dark", "light", "osm"), default="dark",
-                    help="dark = fond sombre ; light = fond clair, routes foncées (plein soleil) ; osm = couleurs d'origine")
+    ap.add_argument("--theme", nargs="+", choices=("dark", "light", "osm"), default=["dark", "light"],
+                    help="un ou plusieurs thèmes (déf. : dark light) : dark = fond sombre ; light = fond clair, "
+                         "routes foncées (plein soleil) ; osm = couleurs d'origine")
     ap.add_argument("--dry-run", action="store_true", help="compter les tuiles sans rien faire")
     a = ap.parse_args()
-    global THEME
-    THEME = a.theme
+    themes = list(dict.fromkeys(a.theme))
 
     if not a.gpx and not a.bbox and not a.png_dir:
         ap.error("donnez --gpx, --bbox ou --png-dir")
@@ -314,8 +314,8 @@ def main():
         return os.path.join(a.cache, a.style, str(z), str(x), "%d.png" % y)
 
     missing = [t for t in todo if not os.path.exists(src_path(*t))]
-    print("total : %d tuiles, %.1f Mo sur la SD ; %d dans le cache, %d à télécharger"
-          % (len(todo), len(todo) * 128 / 1024, len(todo) - len(missing), len(missing)))
+    print("total : %d tuiles x %d thème(s), %.1f Mo sur la SD ; %d dans le cache, %d à télécharger"
+          % (len(todo), len(themes), len(todo) * len(themes) * 128 / 1024, len(todo) - len(missing), len(missing)))
     if a.dry_run:
         return
     if not a.png_dir and not a.offline and len(missing) > a.max_tiles:
@@ -325,9 +325,11 @@ def main():
 
     done = skipped = failed = unavailable = 0
     for i, (z, x, y) in enumerate(todo, 1):
-        dst = os.path.join(a.out, "tiles", str(z), str(x), "%d.raw" % y)
-        if not a.force and os.path.exists(dst) and os.path.getsize(dst) == 131072:
-            skipped += 1
+        dsts = {th: os.path.join(a.out, "tiles_" + th, str(z), str(x), "%d.raw" % y) for th in themes}
+        need = [th for th in themes
+                if a.force or not (os.path.exists(dsts[th]) and os.path.getsize(dsts[th]) == 131072)]
+        skipped += len(themes) - len(need)
+        if not need:
             continue
         src = src_path(z, x, y)
         try:
@@ -345,10 +347,11 @@ def main():
                 with open(src, "wb") as f:
                     f.write(data)
                 time.sleep(a.delay)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            with open(dst, "wb") as f:
-                f.write(to_rgb565_be(img, z))
-            done += 1
+            for th in need:
+                os.makedirs(os.path.dirname(dsts[th]), exist_ok=True)
+                with open(dsts[th], "wb") as f:
+                    f.write(to_rgb565_be(img, z, th))
+                done += 1
         except Exception as e:  # noqa: BLE001
             failed += 1
             print("  échec %d/%d/%d : %s" % (z, x, y, e))

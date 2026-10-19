@@ -8,6 +8,7 @@ static const int MAP_Y0 = 0, MAP_H = 240, BAND_H = 20;  // carte plein écran, c
 static const int MAP_CX = 160, MAP_CY = 150;                  // la position est dans le tiers bas : on voit devant
 static const uint8_t MAP_ZOOMS[5] = {13, 14, 15, 16, 17};
 static const uint16_t MAP_BG = RGB565(10, 15, 20);
+static const uint16_t MAP_BG_LIGHT = RGB565(236, 238, 240);  // fond (tuile absente) du thème clair
 static const uint16_t MAP_BLUE = RGB565(42, 107, 255);
 static const uint16_t MAP_ROUTE_DARK = RGB565(6, 42, 61);
 
@@ -40,6 +41,7 @@ struct MapView {
   char scaleTxt[10];
   hud::Status st;
   bool fix = false, markerOn = false, popOpen = false;
+  bool light = false;       // tuiles du thème clair : couleurs de ce qui est dessiné directement sur la carte
   int src = 0, popX = 0, popY = 0;
   const char *srcName = "";
 };
@@ -116,9 +118,15 @@ static int popHit(int px, int py, int x, int y) {
 static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoomIdx, int nPages) {
   Surf S = onSprite(band, 0, by);
 
-  // Trace : contour sombre puis trait cyan
+  // Couleurs des éléments posés directement sur les tuiles (thème clair : encre sombre, trace bleue cerclée de blanc)
+  const uint16_t inkTxt = v.light ? RGB565(16, 26, 38) : col::TXT;
+  const uint16_t inkSec = v.light ? RGB565(58, 70, 84) : col::SEC;
+  const uint16_t routeCasing = v.light ? RGB565(255, 255, 255) : MAP_ROUTE_DARK;
+  const uint16_t routeLine = v.light ? RGB565(20, 100, 255) : col::ACCENT;
+
+  // Trace : contour puis trait
   for (int pass = 0; pass < 2; pass++) {
-    uint16_t c = pass == 0 ? MAP_ROUTE_DARK : col::ACCENT;
+    uint16_t c = pass == 0 ? routeCasing : routeLine;
     float w = pass == 0 ? 9.0f : 4.6f;
     for (int k = 0; k < nVis; k++) {
       const Seg &sg = vis[k];
@@ -140,7 +148,7 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
 
   // Destination
   if (v.destVisible && v.hasDest && inBand(by, v.dsy - 11, v.dsy + 11)) {
-    disc(S, v.dsx, v.dsy, 9.5f, col::TXT);
+    disc(S, v.dsx, v.dsy, 9.5f, v.light ? inkTxt : col::TXT);
     disc(S, v.dsx, v.dsy, 7.5f, col::RED);
     disc(S, v.dsx, v.dsy, 2.2f, col::TXT);
   }
@@ -210,7 +218,7 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
   if (inBand(by, 76, 88)) {
     char zt[8];
     snprintf(zt, sizeof(zt), "z%d", v.z);
-    text(S, FONT_S9, 299, 85, zt, col::SEC, AL_C, 1);
+    text(S, FONT_S9, 299, 85, zt, inkSec, AL_C, 1);
   }
   if (inBand(by, 88, 156)) {
     mapPlusMinus(S, 284, 89, true, v.canIn);
@@ -219,11 +227,11 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
 
   // Échelle et attribution (obligatoire)
   if (inBand(by, 160, 180)) {
-    hline(S, 8, 176, v.scalePx, col::TXT);
-    vline(S, 8, 170, 7, col::TXT);
-    vline(S, 8 + v.scalePx - 1, 170, 7, col::TXT);
-    text(S, FONT_S11, 8 + v.scalePx + 5, 177, v.scaleTxt, col::TXT);
-    text(S, FONT_M9, 314, 177, "© OpenStreetMap", col::SEC, AL_R);
+    hline(S, 8, 176, v.scalePx, inkTxt);
+    vline(S, 8, 170, 7, inkTxt);
+    vline(S, 8 + v.scalePx - 1, 170, 7, inkTxt);
+    text(S, FONT_S11, 8 + v.scalePx + 5, 177, v.scaleTxt, inkTxt);
+    text(S, FONT_M9, 314, 177, "© OpenStreetMap", inkSec, AL_R);
   }
 
   // Carte du bas : prochain virage, distance restante, arrivée

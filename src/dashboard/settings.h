@@ -4,6 +4,9 @@
 #include <Preferences.h>
 #include "config.h"
 
+// Thème de la carte : Auto = selon la photorésistance
+enum MapTheme { MT_AUTO, MT_DARK, MT_LIGHT };
+
 // Source de la destination (page Direction et guidage sur la carte)
 enum DestMode { DM_AUTO, DM_HOME, DM_TRACK, DM_POINT };
 
@@ -16,6 +19,7 @@ struct Settings {
   int destMode = DM_AUTO;         // choix de la destination (automatique par défaut)
   bool pointOk = false;           // point choisi sur la carte ou fin de trajet
   double pointLat = 0, pointLon = 0;
+  int mapTheme = MT_DARK;         // thème de la carte (tuiles tiles_dark / tiles_light)
 
   void load() {
     Preferences p;
@@ -30,10 +34,12 @@ struct Settings {
     pointOk = p.getBool("pok", false);
     pointLat = p.getDouble("plat", 0);
     pointLon = p.getDouble("plon", 0);
+    mapTheme = p.getInt("mtheme", MT_DARK);
     p.end();
     if (tz < -12 || tz > 14) tz = TZ_OFFSET_H;
     if (gaugeMin < 5 || gaugeMin > 30 || gaugeMin % 5) gaugeMin = GAUGE_MIN_MAX;
     if (destMode < DM_AUTO || destMode > DM_POINT) destMode = DM_AUTO;
+    if (mapTheme < MT_AUTO || mapTheme > MT_LIGHT) mapTheme = MT_DARK;
   }
 
   void save() {
@@ -49,6 +55,7 @@ struct Settings {
     p.putBool("pok", pointOk);
     p.putDouble("plat", pointLat);
     p.putDouble("plon", pointLon);
+    p.putInt("mtheme", mapTheme);
     p.end();
   }
 };

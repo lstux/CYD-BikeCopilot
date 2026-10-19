@@ -15,6 +15,7 @@ struct TripLogger { enum State { IDLE, PENDING, ACTIVE }; State st = ACTIVE; Sta
 struct FakeTrip { double distM = 12400; } trip;
 #include "settings.h"
 static Settings cfg;
+static int ldrRaw = 1830;  // lecture de la photorésistance (maptheme.h sur le matériel)
 static void updateDestination() {}
 #include "settingspage.h"
 
@@ -36,15 +37,16 @@ static void renderMap(TFT_eSPI &tft, const char *dir, const char *name, MapView 
   int ax[3][4] = {{0, 165, 640, 165}, {65, 0, 65, 240}, {0, 20, 320, 75}};
   for (int b = 0; b < MAP_H / BAND_H; b++) {
     int by = b * BAND_H;
-    band.fillSprite(MAP_BG);
+    const bool L = v.light;
+    band.fillSprite(L ? MAP_BG_LIGHT : MAP_BG);
     gfx::Surf S = gfx::onSprite(band, 0, by);
-    gfx::rect(S, 172, 102, 55, 55, RGB565(12, 27, 21));
-    gfx::rect(S, 7, 40, 50, 48, RGB565(12, 27, 21));
+    gfx::rect(S, 172, 102, 55, 55, L ? RGB565(191, 196, 204) : RGB565(12, 27, 21));
+    gfx::rect(S, 7, 40, 50, 48, L ? RGB565(196, 224, 189) : RGB565(12, 27, 21));
     for (int i = 0; i < 3; i++)
       gfx::line(S, ax[i][0], ax[i][1], ax[i][2], ax[i][3], i == 2 ? 5.5f : 3.0f,
-                i == 2 ? RGB565(38, 49, 61) : RGB565(23, 32, 42));
-    gfx::line(S, 0, 130, 320, 130, 3.0f, RGB565(23, 32, 42));
-    gfx::line(S, 100, 0, 100, 240, 3.0f, RGB565(23, 32, 42));
+                i == 2 ? (L ? RGB565(238, 138, 18) : RGB565(38, 49, 61)) : (L ? RGB565(39, 80, 111) : RGB565(23, 32, 42)));
+    gfx::line(S, 0, 130, 320, 130, 3.0f, L ? RGB565(39, 80, 111) : RGB565(23, 32, 42));
+    gfx::line(S, 100, 0, 100, 240, 3.0f, L ? RGB565(39, 80, 111) : RGB565(23, 32, 42));
     drawMapOverlay(band, by, v, 1, 5);
     band.pushSprite(0, by);
   }
@@ -117,12 +119,17 @@ int main(int argc, char **argv) {
     w.spd = -1; w.hasTurn = false; w.onTrack = false; w.popOpen = false; w.panned = false;
     strcpy(w.remNum, "--"); w.remUnit[0] = 0; strcpy(w.eta, "--:--");
     renderMap(tft, dir, "map_nofix", w, nf);
+
+    MapView lt = v;
+    lt.light = true; lt.popOpen = false;
+    renderMap(tft, dir, "map_light", lt, st);
   }
 
   // --- réglages ---
   tft.fillScreen(col::BG);
   hud::statusBar(scr, st);
   cfg.tz = 2; cfg.gaugeMin = 15; cfg.logOn = true; cfg.homeOk = true; cfg.homeLat = 48.1234; cfg.homeLon = 2.3456;
+  cfg.mapTheme = MT_AUTO;
   settingsEnter();
   save(tft, dir, "settings");
 

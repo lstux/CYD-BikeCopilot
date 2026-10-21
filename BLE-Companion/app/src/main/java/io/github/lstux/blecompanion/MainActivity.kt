@@ -4,11 +4,14 @@ import android.bluetooth.BluetoothManager
 import android.content.Intent
 import android.location.LocationManager
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -38,6 +41,16 @@ class MainActivity : AppCompatActivity() {
         messageText = findViewById(R.id.messageText)
         gpsText = findViewById(R.id.gpsText)
         devicesText = findViewById(R.id.devicesText)
+
+        // Depuis Android 15, l'appli est dessinée SOUS la barre d'état et la barre de navigation.
+        // Il faut donc ajouter nous-mêmes des marges égales à la taille de ces barres (et de l'encoche).
+        val root = findViewById<View>(R.id.root)
+        val margin = (16 * resources.displayMetrics.density).toInt()
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            v.setPadding(bars.left + margin, bars.top + margin, bars.right + margin, bars.bottom + margin)
+            insets
+        }
 
         toggle.setOnClickListener {
             when {
@@ -71,11 +84,12 @@ class MainActivity : AppCompatActivity() {
     private fun render(s: UiState) {
         toggle.text = if (s.running) "Arrêter" else "Démarrer"
         messageText.text = s.message
-        gpsText.text = if (s.running) "GPS : ${s.gps}" else ""
+        messageText.visibility = if (s.message.isEmpty()) View.GONE else View.VISIBLE
+        gpsText.text = if (s.running) s.gps else "Arrêté"
         devicesText.text = when {
-            !s.running -> ""
+            !s.running -> "Appuie sur Démarrer pour envoyer la position GPS aux cartes BikeCopilot à proximité."
             s.devices.isEmpty() -> "Recherche de cartes BikeCopilot…"
-            else -> s.devices.joinToString("\n\n") { "${symbol(it.state)} ${it.name}\n     ${it.detail}" }
+            else -> s.devices.joinToString("\n\n") { "${symbol(it.state)}  ${it.name}\n      ${it.detail}" }
         }
     }
 

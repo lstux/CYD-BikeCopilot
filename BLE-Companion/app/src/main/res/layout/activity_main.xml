@@ -1,34 +1,87 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Mise en page : une colonne (titre, bouton, message d'erreur, carte GPS, carte des cartes BLE).
+  Les marges autour de l'écran sont ajoutées par MainActivity (barre d'état, barre de navigation, encoche).
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/titleText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/app_name"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:alpha="0.7"
+        android:text="Pont Bluetooth LE vers les cartes BikeCopilot"
+        android:textSize="14sp" />
 
     <Button
         android:id="@+id/toggleButton"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Démarrer" />
+        android:layout_height="64dp"
+        android:layout_marginTop="20dp"
+        android:text="Démarrer"
+        android:textSize="18sp" />
 
     <TextView
         android:id="@+id/messageText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:textColor="#C62828" />
+        android:textColor="#E53935"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:alpha="0.7"
+        android:text="GPS DU TÉLÉPHONE"
+        android:textSize="12sp"
+        android:textStyle="bold" />
 
     <TextView
         android:id="@+id/gpsText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/card"
+        android:padding="14dp"
         android:textSize="16sp" />
 
     <TextView
-        android:id="@+id/devicesText"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:textSize="16sp" />
+        android:layout_marginTop="20dp"
+        android:alpha="0.7"
+        android:text="CARTES"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <!-- Liste défilante : elle prend toute la place restante, quel que soit le nombre de cartes. -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="6dp"
+        android:layout_weight="1">
+
+        <TextView
+            android:id="@+id/devicesText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card"
+            android:padding="14dp"
+            android:textSize="16sp" />
+    </ScrollView>
 </LinearLayout>

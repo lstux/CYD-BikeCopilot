@@ -48,6 +48,8 @@ Fichier : `User_Setups/T4_V13.h` du dépôt LilyGo_Txx (TFT_eSPI fournit aussi `
 #define SPI_FREQUENCY 60000000
 ```
 
+**Attention : sur notre carte, TFT_DC est sur GPIO26, pas 32.** Avec 32 l'écran reste blanc (rétroéclairage allumé, contrôleur jamais configuré). GPIO26 est la valeur de `Setup22_TTGO_T4.h` (anciennes T4) et celle utilisée avec succès dans le projet FarmerT4. Le firmware utilise donc `-DTFT_DC=26`.
+
 Le rétroéclairage (`TFT_BL`) n'est pas dans ce fichier : il est défini dans le sketch (`T4_V13.h`) sur GPIO4.
 
 ## Brochage complet des GPIO
@@ -59,7 +61,7 @@ Le rétroéclairage (`TFT_BL`) n'est pas dans ce fichier : il est défini dans l
 | TFT_MOSI (SDI) | 23 | |
 | TFT_SCLK (SCK) | 18 | |
 | TFT_CS | 27 | |
-| TFT_DC (RS) | 32 | exposé aussi sur le header (pin 8) |
+| TFT_DC (RS) | 32 | exposé aussi sur le header (pin 8). **Notre carte : GPIO26** (voir ci-dessous) |
 | TFT_RST | 5 | |
 | TFT_MISO (SDO) | 12 | GPIO12 est une broche de strapping (tension flash) : ne pas la forcer à 1 au démarrage |
 | TFT_BL | 4 | active haut, via transistor Q14 (MMBT2222) ; PWM possible |

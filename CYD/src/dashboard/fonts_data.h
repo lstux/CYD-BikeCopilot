@@ -1,4 +1,4 @@
-// Généré par tools/make_fonts.py — ne pas modifier à la main.
+// Généré par CYD/tools/make_fonts.py — ne pas modifier à la main.
 // Polices : Inter (SIL OFL 1.1), glyphes alpha 8 bits.
 #pragma once
 #include <stdint.h>

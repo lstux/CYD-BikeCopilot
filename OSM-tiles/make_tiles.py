@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Prépare les tuiles de carte pour la carte SD du CYD-BikeCopilot.
-Dépendances : pip install pillow numpy
+"""Prépare les tuiles de carte pour la carte SD des cartes BikeCopilot (CYD, ...).
+Dépendances : pip install pillow numpy. À lancer depuis la racine du dépôt (cache et sortie y sont créés).
 
 Sortie : <out>/tiles_<thème>/<z>/<x>/<y>.raw  (256x256, RGB565 big-endian, 131072 octets)
          un dossier par thème : tiles_dark, tiles_light (ou tiles_osm), lus par le firmware selon le
@@ -24,12 +24,12 @@ ou --png-dir avec des tuiles obtenues légalement. Ce script plafonne à --max-t
 de tuiles À TÉLÉCHARGER (celles déjà dans le cache ne comptent pas).
 
 Exemples :
-  python3 tools/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/
-  python3 tools/make_tiles.py --bbox 48.84 2.28 48.87 2.33 --zoom 16 --out sd/
-  python3 tools/make_tiles.py --bbox 48.84 2.28 48.87 2.33 --zoom 16 --out sd/ --offline --force --theme dark light
-  python3 tools/make_tiles.py --png-dir mes_tuiles_png --zoom 16 --out sd/
+  python3 OSM-tiles/make_tiles.py --gpx route.gpx --zoom 15 16 17 --out sd/
+  python3 OSM-tiles/make_tiles.py --bbox 48.84 2.28 48.87 2.33 --zoom 16 --out sd/
+  python3 OSM-tiles/make_tiles.py --bbox 48.84 2.28 48.87 2.33 --zoom 16 --out sd/ --offline --force --theme dark light
+  python3 OSM-tiles/make_tiles.py --png-dir mes_tuiles_png --zoom 16 --out sd/
 
-La page tools/tiles-manager.html aide à choisir les zones et génère ces commandes.
+La page OSM-tiles/tiles-manager.html aide à choisir les zones et génère ces commandes.
 """
 import argparse
 import math
@@ -277,7 +277,7 @@ def main():
     ap.add_argument("--cache", default="tiles_src", help="dossier des tuiles originales PNG (déf. tiles_src)")
     ap.add_argument("--offline", action="store_true", help="ne rien télécharger : convertir seulement ce qui est dans le cache")
     ap.add_argument("--force", action="store_true", help="réécrire les .raw déjà présents (après un changement de thème)")
-    ap.add_argument("--user-agent", default="CYD-BikeCopilot-tiles/1.0 (usage personnel)")
+    ap.add_argument("--user-agent", default="BikeCopilot-tiles/1.0 (usage personnel)")
     ap.add_argument("--delay", type=float, default=0.6, help="secondes entre deux requêtes")
     ap.add_argument("--max-tiles", type=int, default=400, help="plafond de tuiles à télécharger")
     ap.add_argument("--theme", nargs="+", choices=("dark", "light", "osm"), default=["dark", "light"],

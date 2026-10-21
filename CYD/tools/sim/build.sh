@@ -1,6 +1,6 @@
 #!/bin/sh
 # Compile le simulateur d'interface et produit des PNG (×3) dans le dossier donné.
-# Usage : tools/sim/build.sh [dossier_de_sortie]   (nécessite g++ et python3 + Pillow)
+# Usage : CYD/tools/sim/build.sh [dossier_de_sortie]   (nécessite g++ et python3 + Pillow)
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${1:-$HERE/out}"

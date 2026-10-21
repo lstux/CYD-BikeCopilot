@@ -9,8 +9,9 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <TFT_eSPI.h>
-#include <TinyGPSPlus.h>
 #include "config.h"
+#include "gpsfix.h"
+#include "geo.h"
 #include "compass.h"
 #include "ui.h"
 #include "page_gauge.h"
@@ -21,7 +22,8 @@
 
 TFT_eSPI tft;
 TFT_eSprite spr(&tft);
-TinyGPSPlus gps;
+TinyGPSPlus gps;  // GPS série (propre à la CYD)
+Fix fix;          // position courante lue par tout le reste du code
 Touch touch;
 Settings cfg;
 TripLogger logger;
@@ -61,23 +63,24 @@ double mapPopLat = 0, mapPopLon = 0;
 static float currentKmh();
 static void pollGps() {
   while (Serial2.available()) gps.encode(Serial2.read());
+  fixFromGps(gps, fix);
 }
 
 static void localTime(char *out, size_t n) {
-  if (!gps.time.isValid()) {
+  if (!fix.timeValid) {
     snprintf(out, n, "--:--");
     return;
   }
-  int h = (gps.time.hour() + cfg.tz + 24) % 24;
-  snprintf(out, n, "%02d:%02d", h, gps.time.minute());
+  int h = (fix.hour + cfg.tz + 24) % 24;
+  snprintf(out, n, "%02d:%02d", h, fix.minute);
 }
 
 static gfx::Surf scr() { return gfx::onScreen(tft, col::BG); }
 
 static hud::Status currentStatus() {
   hud::Status st;
-  st.sats = (int)gps.satellites.value();
-  st.fix = gps.location.isValid() && gps.location.age() < 3000;
+  st.sats = fix.sats;
+  st.fix = fix.valid;
   TripLogger::State ls = logger.state();
   st.rec = ls == TripLogger::ACTIVE ? 2 : (ls == TripLogger::PENDING ? 1 : 0);
   localTime(st.clock, sizeof(st.clock));
@@ -171,10 +174,9 @@ static bool speedMoving = false;
 static uint32_t speedAboveSince = 0, speedLastMs = 0;
 
 static void updateSpeed(uint32_t now) {
-  float raw = (gps.speed.isValid() && gps.speed.age() < 3000) ? gps.speed.kmph() : 0;
+  float raw = fix.speedValid ? fix.kmh : 0;
   if (!speedMoving) {
-    bool good = gps.location.isValid() && gps.satellites.value() >= SPEED_MIN_SATS &&
-                gps.hdop.isValid() && gps.hdop.hdop() <= SPEED_HDOP_MAX;
+    bool good = fix.valid && fix.sats >= SPEED_MIN_SATS && fix.hdopValid && fix.hdop <= SPEED_HDOP_MAX;
     if (good && raw >= SPEED_START_KMH) {
       if (speedAboveSince == 0) speedAboveSince = now;
       if (now - speedAboveSince >= SPEED_START_MS) {
@@ -313,7 +315,7 @@ static void drawStats() {
   snprintf(v, sizeof(v), "%.1f", trip.maxKmh);
   drawStat(4, v, "km/h", trip.maxKmh > 0 ? col::TXT : col::SEC);
 
-  if (gps.altitude.isValid()) snprintf(v, sizeof(v), "%d", (int)(gps.altitude.meters() + 0.5));
+  if (fix.altValid) snprintf(v, sizeof(v), "%d", (int)(fix.alt + 0.5));
   else snprintf(v, sizeof(v), "--");
   drawStat(5, v, "m");
 }
@@ -331,17 +333,17 @@ struct DirState {
 static DirState dirState() {
   DirState d;
   float kmh = currentKmh();
-  d.fix = gps.location.isValid() && gps.location.age() < 3000;
-  if (kmh >= COURSE_MIN_KMH && gps.course.isValid()) {
-    d.heading = gps.course.deg();
+  d.fix = fix.valid;
+  if (kmh >= COURSE_MIN_KMH && fix.courseValid) {
+    d.heading = fix.course;
     d.src = "cap GPS";
   } else if (compass.ok() && compass.calibrated()) {
     d.heading = compass.heading(COMPASS_OFFSET_DEG, COMPASS_INVERT);
   }
   d.haveDest = d.fix && destValid;
   if (d.haveDest) {
-    d.distM = TinyGPSPlus::distanceBetween(gps.location.lat(), gps.location.lng(), destLat, destLon);
-    d.bearing = (float)TinyGPSPlus::courseTo(gps.location.lat(), gps.location.lng(), destLat, destLon);
+    d.distM = distanceM(fix.lat, fix.lon, destLat, destLon);
+    d.bearing = (float)bearingDeg(fix.lat, fix.lon, destLat, destLon);
     d.rel = pg_compass::norm360(d.bearing - d.heading + 180.0f) - 180.0f;
   }
   return d;
@@ -401,15 +403,17 @@ static void drawDirectionTiles() {
 // Trajet
 // =====================================================================
 static void updateTrip() {
-  if (!(gps.location.isValid() && gps.location.isUpdated())) return;
+  static uint32_t lastSeq = 0;
+  if (!fix.valid || fix.seq == lastSeq) return;  // un seul traitement par nouvelle position
+  lastSeq = fix.seq;
   uint32_t now = millis();
   float kmh = speedKmh;
-  double lat = gps.location.lat(), lon = gps.location.lng();
+  double lat = fix.lat, lon = fix.lon;
 
   if (trip.hasLast) {
     uint32_t dt = now - trip.lastTickMs;
     if (speedMoving) {
-      double d = TinyGPSPlus::distanceBetween(trip.lastLat, trip.lastLon, lat, lon);
+      double d = distanceM(trip.lastLat, trip.lastLon, lat, lon);
       if (d >= MIN_STEP_M) {
         trip.distM += d;
         trip.lastLat = lat;
@@ -417,8 +421,8 @@ static void updateTrip() {
       }
       trip.movingMs += dt;
       if (kmh > trip.maxKmh) trip.maxKmh = kmh;
-      if (gps.altitude.isValid()) {  // dénivelé positif : lissage + hystérésis de 3 m
-        float alt = (float)gps.altitude.meters();
+      if (fix.altValid) {  // dénivelé positif : lissage + hystérésis de 3 m
+        float alt = fix.alt;
         if (!trip.hasAlt) { trip.hasAlt = true; trip.altFilt = trip.altRef = alt; }
         trip.altFilt += (alt - trip.altFilt) * 0.2f;
         if (trip.altFilt - trip.altRef >= 3.0f) { trip.climbM += trip.altFilt - trip.altRef; trip.altRef = trip.altFilt; }
@@ -623,16 +627,15 @@ static void handleTouch() {
 
 static void updateLogger(uint32_t now) {
   LogSample s;
-  bool fixOk = gps.location.isValid() && gps.location.age() < 3000 && gps.date.isValid() && gps.time.isValid();
+  bool fixOk = fix.valid && fix.dateValid && fix.timeValid;
   if (fixOk) {
-    s.epoch = epochFromDate(gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(),
-                            gps.time.second());
-    s.lat = gps.location.lat();
-    s.lon = gps.location.lng();
-    s.alt = gps.altitude.isValid() ? (float)gps.altitude.meters() : 0;
+    s.epoch = epochFromDate(fix.year, fix.month, fix.day, fix.hour, fix.minute, fix.second);
+    s.lat = fix.lat;
+    s.lon = fix.lon;
+    s.alt = fix.altValid ? fix.alt : 0;
     s.kmh = speedKmh;
-    s.sats = (uint8_t)gps.satellites.value();
-    s.hdop = gps.hdop.isValid() ? (float)gps.hdop.hdop() : 0;
+    s.sats = fix.sats;
+    s.hdop = fix.hdopValid ? fix.hdop : 0;
   }
   logger.update(now, cfg.logOn && sdOk, speedMoving, fixOk, s, cfg.tz);
 }
@@ -775,11 +778,11 @@ void setup() {
 void loop() {
   static uint32_t lastFrame = 0, lastSlow = 0, lastCompass = 0;
 
-  while (Serial2.available()) gps.encode(Serial2.read());
-  if (gps.location.isValid() && gps.location.age() < 3000) {  // mémorise la dernière position connue
+  pollGps();
+  if (fix.valid) {  // mémorise la dernière position connue
     lastFixOk = true;
-    lastFixLat = gps.location.lat();
-    lastFixLon = gps.location.lng();
+    lastFixLat = fix.lat;
+    lastFixLon = fix.lon;
   }
   updateSpeed(millis());
   updateTrip();

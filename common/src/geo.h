@@ -23,3 +23,15 @@ static inline double distanceM(double lat1, double lon1, double lat2, double lon
   double x = (s1 * s2) + (c1 * c2 * cdl);
   return atan2(sqrt(y), x) * 6372795.0;
 }
+
+// Cap initial en degrés (0..360, 0 = nord) pour aller du point 1 au point 2.
+// Même formule que TinyGPSPlus::courseTo.
+static inline double bearingDeg(double lat1, double lon1, double lat2, double lon2) {
+  double dlon = (lon2 - lon1) * M_PI / 180.0;
+  double a1 = lat1 * M_PI / 180.0, a2 = lat2 * M_PI / 180.0;
+  double y = sin(dlon) * cos(a2);
+  double x = cos(a1) * sin(a2) - sin(a1) * cos(a2) * cos(dlon);
+  double r = atan2(y, x);
+  if (r < 0.0) r += 2.0 * M_PI;
+  return r * 180.0 / M_PI;
+}

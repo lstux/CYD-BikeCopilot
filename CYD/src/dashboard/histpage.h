@@ -19,9 +19,8 @@ static bool histConfirm = false;  // fenêtre « Supprimer ce trajet ? » affich
 static bool histDestSet = false;  // destination fixée depuis ce détail
 
 static uint32_t histNowEpoch() {
-  if (gps.date.isValid() && gps.time.isValid() && gps.date.year() >= 2024)
-    return epochFromDate(gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(),
-                         gps.time.second());
+  if (fix.dateValid && fix.timeValid && fix.year >= 2024)
+    return epochFromDate(fix.year, fix.month, fix.day, fix.hour, fix.minute, fix.second);
   return histN > 0 ? hist[histN - 1].t0 : 0;
 }
 

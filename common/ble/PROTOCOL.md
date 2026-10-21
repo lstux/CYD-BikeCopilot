@@ -3,7 +3,7 @@
 Standard commun entre l'appli Android [BLE-Companion](../../BLE-Companion/README.md) et les cartes (T4, Waveshare C6, CYD…).
 Les cartes ne font que **s'annoncer et recevoir** ; le téléphone est le *central* : il scanne, se connecte, et écrit.
 
-Implémentation de référence côté carte : [`../src/ble_proto.h`](../src/ble_proto.h) (UUID, décodage → `Fix`).
+Implémentation de référence côté carte : [`../src/ble_proto.h`](../src/ble_proto.h) (UUID, décodage). Premier firmware qui l'utilise : [Lilygo-T4](../../Lilygo-T4/README.md) (`blelink.cpp`, environnement `dashboard-ble`).
 Test : `g++ -std=c++17 -I common/src common/tools/ble_proto_test.cpp -o /tmp/ble_proto_test && /tmp/ble_proto_test`.
 
 ## Rôles

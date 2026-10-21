@@ -37,8 +37,14 @@ jobs:
 
       - run: pip install platformio
 
+      # Les erreurs de compilation sont aussi publiées en annotations (lisibles sans télécharger les journaux).
       - name: Compilation (${{ matrix.env }})
-        run: pio run -d Lilygo-T4 -e ${{ matrix.env }}
+        run: |
+          set -o pipefail
+          pio run -d Lilygo-T4 -e ${{ matrix.env }} 2>&1 | tee build.log || {
+            grep -E "error|undefined reference|\*\*\*" build.log | head -25 | cut -c1-400 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          }
 
       - uses: actions/upload-artifact@v4
         with:

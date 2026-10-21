@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Génère src/dashboard/fonts_data.h : polices lissées (alpha 8 bits) extraites d'Inter.
+"""Génère common/src/fonts_data.h : polices lissées (alpha 8 bits) extraites d'Inter.
 
 Inter (SIL Open Font License 1.1, https://rsms.me/inter/) doit être installée : fichiers
 Inter-Bold.otf, Inter-SemiBold.otf, Inter-Medium.otf (paquet Debian `fonts-inter`, ou
-téléchargement sur le site). Usage :  python3 tools/make_fonts.py [dossier_des_polices]
+téléchargement sur le site). Usage :  python3 common/tools/make_fonts.py [dossier_des_polices]
 Le fichier généré est versionné : il n'est à régénérer que pour changer polices ou tailles.
 """
 import os
@@ -11,7 +11,7 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 FONT_DIR = sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/opentype/inter"
-OUT = os.path.join(os.path.dirname(__file__), "..", "src", "dashboard", "fonts_data.h")
+OUT = os.path.join(os.path.dirname(__file__), "..", "src", "fonts_data.h")
 
 DIG = "0123456789"
 NUM = DIG + ".:-+°%/ h!−"
@@ -66,7 +66,7 @@ def build(name, fname, size, chars, tabular):
 
 def main():
     out = []
-    out.append("// Généré par tools/make_fonts.py — ne pas modifier à la main.\n")
+    out.append("// Généré par common/tools/make_fonts.py — ne pas modifier à la main.\n")
     out.append("// Polices : Inter (SIL OFL 1.1), glyphes alpha 8 bits.\n#pragma once\n#include <stdint.h>\n\n")
     out.append("struct GlyphDef { uint16_t code; uint32_t off; uint8_t w, h, adv; int8_t dx, dy; };\n")
     out.append("struct FontDef { const GlyphDef *glyphs; uint16_t n; const uint8_t *bmp; uint8_t ascent, lineH; };\n\n")

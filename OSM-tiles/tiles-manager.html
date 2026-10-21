@@ -144,7 +144,7 @@ pre { margin: 6px 0 0; padding: 10px; background: var(--code); color: var(--code
 <script>
 "use strict";
 
-// --- Calcul des tuiles : mêmes formules que tools/make_tiles.py ----------------------------
+// --- Calcul des tuiles : mêmes formules que OSM-tiles/make_tiles.py ----------------------------
 const Z_ALL = [13, 14, 15, 16, 17];
 const SD_KB_PER_TILE = 128;          // 256*256*2 octets
 const OSM_SOFT_LIMIT = 400;          // plafond par défaut de make_tiles.py (--max-tiles)
@@ -217,7 +217,7 @@ base.on("tileerror", () => {
   if (++tileErrors === 4) {
     const b = $("banner"); b.style.display = "block";
     b.firstElementChild.textContent = "Le fond de carte ne se charge pas. Si la page est ouverte depuis un fichier, servez-la en local : " +
-      "python3 -m http.server -d tools 8000, puis http://localhost:8000/tiles-manager.html";
+      "python3 -m http.server -d OSM-tiles 8000, puis http://localhost:8000/tiles-manager.html";
   }
 });
 map.on("moveend", () => { try { localStorage.setItem("tm-view", JSON.stringify({ c: [map.getCenter().lat, map.getCenter().lng], z: map.getZoom() })); } catch (e) {} });
@@ -335,7 +335,7 @@ function commands() {
     else sel = "--gpx " + sq(z.file) + (z.margin !== 1 ? " --margin " + z.margin : "");
     const total = zs.reduce((a, zm) => a + (z.counts[zm] || 0), 0);
     const cap = !custom && total > OSM_SOFT_LIMIT ? [" --max-tiles " + total] : [];
-    const head = "python3 tools/make_tiles.py " + sel + " " + common.join(" ");
+    const head = "python3 OSM-tiles/make_tiles.py " + sel + " " + common.join(" ");
     lines1.push("# " + z.name + " (" + fmt(total) + " tuiles)\n" + head + cap.join(""));
     lines2.push("# " + z.name + "\n" + head + " --offline --force");
   }

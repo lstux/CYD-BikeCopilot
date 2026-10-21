@@ -6,8 +6,8 @@
 // éléments d'interface par-dessus, puis on envoie la bande à l'écran. Pas de scintillement
 // et pas besoin d'un tampon plein écran (trop gros pour la mémoire de l'ESP32).
 //
-// Ce fichier est inclus par main.cpp, après la définition de tft, gps, compass, col::,
-// destLat/destLon, currentKmh() et pollGps().
+// Ce fichier est inclus par main.cpp, après la définition de tft, fix, compass, col::, destLat/destLon,
+// sdOk (carte SD montée), mapLight, currentKmh() et pollGps().
 #include <SD.h>
 #include <SPI.h>
 #include "tiles.h"
@@ -17,8 +17,6 @@
 TFT_eSprite band(&tft);
 TileCache tiles;
 Track track;
-SPIClass sdSPI(VSPI);
-bool sdOk = false;
 
 static int mapZoomIdx = 3;
 static bool mapShownLight = false;  // les tuiles affichées sont-elles celles du thème clair ?
@@ -43,8 +41,8 @@ static void mapMessage(const char *msg, uint16_t color) {
 }
 
 static float navHeading(float kmh) {
-  if (kmh >= COURSE_MIN_KMH && gps.course.isValid())
-    lastHeading = gps.course.deg();
+  if (kmh >= COURSE_MIN_KMH && fix.courseValid)
+    lastHeading = fix.course;
   else if (compass.ok() && compass.calibrated())
     lastHeading = compass.heading(COMPASS_OFFSET_DEG, COMPASS_INVERT);
   return lastHeading;
@@ -227,12 +225,12 @@ static void renderMapPage(uint32_t now) {
     }
     return;
   }
-  bool fix = gps.location.isValid() && gps.location.age() < 3000;
+  bool haveFix = fix.valid;
   double clat = 0, clon = 0;
   int src = CS_LIVE;
-  if (fix) {
-    clat = gps.location.lat();
-    clon = gps.location.lng();
+  if (haveFix) {
+    clat = fix.lat;
+    clon = fix.lon;
     noFixShown = false;
   } else if (!mapCenter(clat, clon, src)) {
     if (!noFixShown) {
@@ -254,13 +252,13 @@ static void renderMapPage(uint32_t now) {
   float kmh = currentKmh();
   MapView v;
   memset(&v, 0, sizeof(v));
-  v.fix = fix;
+  v.fix = haveFix;
   v.light = mapShownLight;
   v.src = src;
-  v.markerOn = fix || src == CS_LAST;
+  v.markerOn = haveFix || src == CS_LAST;
   v.srcName = mapSrcName(src);
   v.z = z;
-  v.spd = fix ? (int)(kmh + 0.5f) : -1;
+  v.spd = haveFix ? (int)(kmh + 0.5f) : -1;
   v.heading = navHeading(kmh);
   v.hasDest = destValid;
   v.posX = (int)(wxd - ox);
@@ -273,7 +271,7 @@ static void renderMapPage(uint32_t now) {
   v.popY = mapPopY;
   v.hasTrack = track.valid();
   bool haveRemain = false;
-  if (fix) {
+  if (haveFix) {
     if (v.hasTrack) {
       float off = track.follow(clat, clon);
       v.onTrack = off < 60.0f;
@@ -281,7 +279,7 @@ static void renderMapPage(uint32_t now) {
       if (v.onTrack) v.hasTurn = track.nextTurn(v.turnD, v.turnA);
       haveRemain = true;
     } else if (destValid) {
-      v.remain = (float)TinyGPSPlus::distanceBetween(clat, clon, destLat, destLon);
+      v.remain = (float)distanceM(clat, clon, destLat, destLon);
       haveRemain = true;
     }
   }
@@ -295,8 +293,8 @@ static void renderMapPage(uint32_t now) {
   v.st = currentStatus();
   {  // heure d'arrivée estimée
     int mins = (int)(v.remain / 1000.0f / etaSpeedKmh() * 60.0f + 0.5f);
-    if (haveRemain && gps.time.isValid()) {
-      int t = ((gps.time.hour() + cfg.tz + 24) % 24) * 60 + gps.time.minute() + mins;
+    if (haveRemain && fix.timeValid) {
+      int t = ((fix.hour + cfg.tz + 24) % 24) * 60 + fix.minute + mins;
       snprintf(v.eta, sizeof(v.eta), "%02d:%02d", (t / 60) % 24, t % 60);
     } else {
       strcpy(v.eta, "--:--");
@@ -317,7 +315,7 @@ static void renderMapPage(uint32_t now) {
   snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s%s|%s%s|%s|%s|%d%d%d|%d|%d|%d|%d|%d%d%d", v.spd, z,
            (int)(v.heading / 8), v.onTrack, v.hasTurn, v.turnNum, v.turnUnit, v.remNum, v.remUnit, v.eta,
            v.st.clock, v.st.sats, v.st.fix, v.st.rec, (int)v.turnA / 10, (int)panX, (int)panY, v.homeVisible,
-           fix, src, (int)v.popOpen);
+           haveFix, src, (int)v.popOpen);
   // (le changement de thème force le redessin : voir mapUseTheme)
   bool moved = labs((long)(ox - lastOx)) >= 2 || labs((long)(oy - lastOy)) >= 2;
   if (!mapForce && !moved && strcmp(key, lastKey) == 0) return;

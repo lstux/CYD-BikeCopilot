@@ -217,10 +217,10 @@ static SettingsAction settingsTap(int x, int y) {
       break;
     case 7:
       if (x >= 200) {
-        if (gps.location.isValid() && gps.location.age() < 3000) {
+        if (fix.valid) {
           cfg.homeOk = true;
-          cfg.homeLat = gps.location.lat();
-          cfg.homeLon = gps.location.lng();
+          cfg.homeLat = fix.lat;
+          cfg.homeLon = fix.lon;
           cfg.save();
           updateDestination();
           homeMsg = 1;

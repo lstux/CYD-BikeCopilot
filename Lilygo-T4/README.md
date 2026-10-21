@@ -1,3 +1,8 @@
-# Lilygo T4 Bike Copilot
+# BikeCopilot — LilyGO TTGO T4 v1.3 (ESP32)
 
-Placeholder for file for T4 based Bike Copilot. Using phone GPS over WiFi/BLE.
+À faire. Version ESP32 d'origine (pas la S3).
+
+Matériel : ESP32, écran ILI9341 320×240 (comme la CYD), 3 boutons utilisateur (pas de tactile), lecteur microSD, 8 Mo de PSRAM.
+Position : fournie par le téléphone (Wi-Fi / BLE), pas de GPS embarqué.
+
+Le code d'affichage vient de [`../common`](../common/README.md).

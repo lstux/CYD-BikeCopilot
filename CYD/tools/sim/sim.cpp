@@ -1,5 +1,5 @@
 // Simulateur d'interface : dessine chaque page avec des données d'exemple et écrit des images.
-// Compilation : voir tools/sim/build.sh
+// Compilation : voir CYD/tools/sim/build.sh
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include "page_gauge.h"

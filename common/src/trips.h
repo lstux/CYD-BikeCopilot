@@ -7,12 +7,12 @@
 //   nom,t0,distance_m,durée_s,temps_roulant_s,vmax,vmoy,d+,d-
 #include <Arduino.h>
 #include <SD.h>
-#include <TinyGPSPlus.h>
 #include <functional>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "geo.h"
 #include "tripdata.h"
 
 #define TRIP_DIR       "/trips"
@@ -95,7 +95,7 @@ static bool tripAnalyze(const char *path, TripSummary &s, TripSeries *ser) {
       first = t;
     } else if (kmh > 0.5f) {
       double dt = t - pt;
-      dist += TinyGPSPlus::distanceBetween(pla, plo, la, lo);
+      dist += distanceM(pla, plo, la, lo);
       mov += dt > 10 ? 10 : (dt < 0 ? 0 : dt);
     }
     if (kmh > maxK) maxK = kmh;
@@ -146,7 +146,7 @@ static bool tripAnalyze(const char *path, TripSummary &s, TripSeries *ser) {
       double t, la, lo;
       float alt, kmh;
       if (!parseRow(l, t, la, lo, alt, kmh)) return;
-      if (h2 && kmh > 0.5f) cum += TinyGPSPlus::distanceBetween(qla, qlo, la, lo);
+      if (h2 && kmh > 0.5f) cum += distanceM(qla, qlo, la, lo);
       qla = la;
       qlo = lo;
       h2 = true;

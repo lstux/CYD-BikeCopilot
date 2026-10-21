@@ -6,6 +6,7 @@
 #include "phonefix.h"
 #include "speed.h"
 #include "buttons.h"
+#include "blesample.h"
 
 static int fails = 0, checks = 0;
 #define CHECK(cond)                                                       \
@@ -260,8 +261,71 @@ static void testButtons() {
   CHECK(b.update(false, 16100) == BE_NONE);
 }
 
+// Message GPS_FIX du protocole BLE (vecteur de common/ble/PROTOCOL.md) -> PhoneSample -> Fix
+static const uint8_t BLE_FULL[] = {0x01, 0x14, 0xf0, 0xec, 0x1e, 0x1d, 0xd0, 0xea, 0x66, 0x01, 0xea,
+                                   0x00, 0x53, 0x07, 0x23, 0x00, 0x06, 0x0c, 0x5b, 0x95, 0xd8, 0x6a};
+static const uint8_t BLE_NOTIME[] = {0x01, 0x14, 0xf0, 0xec, 0x1e, 0x1d, 0xd0, 0xea, 0x66, 0x01, 0xff,
+                                     0xff, 0xff, 0xff, 0x00, 0x80, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+static void testBle() {
+  PhoneSample s;
+  CHECK(bleFeedToSample(BLE_FULL, sizeof BLE_FULL, 5000, s));
+  CHECK(s.have);
+  NEAR(s.lat, 48.8566, 1e-6);
+  NEAR(s.lon, 2.3522, 1e-6);
+  CHECK(s.speedValid);
+  NEAR(s.speedMs, 23.4 / 3.6, 1e-4);  // km/h -> m/s
+  CHECK(s.bearingValid);
+  NEAR(s.bearing, 187.5, 1e-4);
+  CHECK(s.altValid);
+  NEAR(s.alt, 35, 1e-6);
+  CHECK(s.accValid);
+  NEAR(s.acc, 6, 1e-6);
+  CHECK(s.timeMs == 1792578907000ULL);
+
+  // jusqu'à la Fix : heure UTC 2026-10-21 10:35:07, vitesse en km/h
+  Fix f;
+  PhoneTracker t;
+  phoneApply(f, t, s, 5000);
+  CHECK(f.valid && f.seq == 1);
+  NEAR(f.kmh, 23.4, 1e-3);
+  CHECK(f.timeValid && f.dateValid);
+  CHECK(f.year == 2026 && f.month == 10 && f.day == 21 && f.hour == 10 && f.minute == 35 && f.second == 7);
+
+  // même message reçu deux fois (même seconde UTC) : pas un nouveau point
+  phoneApply(f, t, s, 6000);
+  CHECK(f.seq == 1);
+  // message suivant (seconde suivante) : nouveau point
+  PhoneSample s2 = s;
+  s2.timeMs += 1000;
+  phoneApply(f, t, s2, 6100);
+  CHECK(f.seq == 2);
+  // silence de plus de 5 s : la Fix n'est plus valide
+  phoneApply(f, t, s2, 6100 + PHONE_FIX_STALE_MS + 1);
+  CHECK(!f.valid);
+
+  // sans heure UTC : chaque message est un nouveau point (identifié par millis), l'heure reste inconnue
+  PhoneSample a, b;
+  Fix g;
+  PhoneTracker tg;
+  CHECK(bleFeedToSample(BLE_NOTIME, sizeof BLE_NOTIME, 10000, a));
+  CHECK(bleFeedToSample(BLE_NOTIME, sizeof BLE_NOTIME, 11000, b));
+  CHECK(!a.speedValid && !a.bearingValid && !a.altValid && !a.accValid);
+  phoneApply(g, tg, a, 10000);
+  phoneApply(g, tg, b, 11000);
+  CHECK(g.valid && g.seq == 2 && !g.timeValid);
+
+  // messages à ignorer : trop courts, type inconnu
+  PhoneSample none;
+  CHECK(!bleFeedToSample(BLE_FULL, 1, 0, none));
+  const uint8_t other[] = {0x7e, 0x02, 0xaa, 0xbb};
+  CHECK(!bleFeedToSample(other, sizeof other, 0, none));
+  CHECK(!none.have);
+}
+
 int main() {
   testPhoneFix();
+  testBle();
   testSpeed();
   testTrip();
   testGauge();

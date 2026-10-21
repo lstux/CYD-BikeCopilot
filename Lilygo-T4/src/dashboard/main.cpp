@@ -60,10 +60,16 @@ static void localClock(char *out, size_t n) {
 }
 
 static const char *linkText() {
+#ifdef PHONE_LINK_BLE
+  if (!linkInfo.bleAdvertising && !linkInfo.bleConnected) return "démarrage";
+  if (!linkInfo.bleConnected) return "attente du téléphone";
+  return "attente GPS";
+#else
   if (linkInfo.mode == 0) return "démarrage";
   if (linkInfo.mode == 2 && linkInfo.apClients == 0) return "Wi-Fi : mode AP";
   if (!linkInfo.wsConnected) return linkInfo.wsStarted ? "connexion" : "recherche appli";
   return "attente GPS";
+#endif
 }
 
 static void drawStatusBar(bool force = false) {
@@ -170,6 +176,40 @@ static void drawLine(int i, const char *str, bool title = false, uint16_t color 
   else gfx::text(scr(), FONT_S13, 8, y0 + 17, str, color);
 }
 
+// Lignes 5 et 6 : dernière position reçue (commun aux deux types de liaison)
+static void drawPositionLines() {
+  char b[72];
+  if (fix.valid) {
+    snprintf(b, sizeof(b), "Position : %.5f  %.5f", fix.lat, fix.lon);
+    drawLine(5, b);
+    float age = (millis() - phoneTrk.lastNewMs) / 1000.0f;
+    if (phoneTrk.accValid) snprintf(b, sizeof(b), "Précision %d m  -  vitesse %.1f km/h", (int)(phoneTrk.acc + 0.5f), fix.kmh);
+    else snprintf(b, sizeof(b), "Vitesse %.1f km/h  -  point reçu il y a %.0f s", fix.kmh, age);
+    drawLine(6, b, false, col::SEC);
+  } else {
+    drawLine(5, "Position : aucune", false, col::SEC);
+    drawLine(6, "");
+  }
+}
+
+#ifdef PHONE_LINK_BLE
+static void drawLinkPage() {
+  char b[72];
+  drawLine(0, "Liaison téléphone (Bluetooth)", true);
+  snprintf(b, sizeof(b), "Carte : %s", linkInfo.bleName);
+  drawLine(1, b);
+  if (linkInfo.bleConnected) {
+    drawLine(2, "Téléphone : connecté", false, col::OK);
+    snprintf(b, sizeof(b), "MTU %u  -  %lu positions reçues", (unsigned)linkInfo.bleMtu, (unsigned long)linkInfo.bleMsgs);
+    drawLine(3, b, false, col::SEC);
+  } else {
+    drawLine(2, "Téléphone : en attente...", false, col::AMBER);
+    drawLine(3, "Lancer BLE-Companion, puis Démarrer", false, col::SEC);
+  }
+  drawLine(4, "");
+  drawPositionLines();
+}
+#else
 static void drawLinkPage() {
   char b[72];
   drawLine(0, "Liaison téléphone", true);
@@ -195,19 +235,9 @@ static void drawLinkPage() {
   else if (linkInfo.wsStarted) snprintf(b, sizeof(b), "SensorServer : connexion à %s...", linkInfo.host);
   else snprintf(b, sizeof(b), "SensorServer : recherche (port %u)...", linkInfo.port);
   drawLine(4, b, false, linkInfo.wsConnected ? col::OK : col::AMBER);
-
-  if (fix.valid) {
-    snprintf(b, sizeof(b), "Position : %.5f  %.5f", fix.lat, fix.lon);
-    drawLine(5, b);
-    float age = (millis() - phoneTrk.lastNewMs) / 1000.0f;
-    if (phoneTrk.accValid) snprintf(b, sizeof(b), "Précision %d m  -  vitesse %.1f km/h", (int)(phoneTrk.acc + 0.5f), fix.kmh);
-    else snprintf(b, sizeof(b), "Vitesse %.1f km/h  -  point reçu il y a %.0f s", fix.kmh, age);
-    drawLine(6, b, false, col::SEC);
-  } else {
-    drawLine(5, "Position : aucune", false, col::SEC);
-    drawLine(6, "");
-  }
+  drawPositionLines();
 }
+#endif
 
 // =====================================================================
 // Remise à zéro du trajet
@@ -234,12 +264,20 @@ static void handleButtons(uint32_t now) {
   BtnEvent e[4];
   for (int i = 0; i < 4; i++) e[i] = btn[i].update(digitalRead(BTN_PINS[i]) == LOW, now);
 
+#ifdef PHONE_LINK_BLE
+  if (e[3] == BE_VLONG) {  // BTN4 (BOOT) 5 s : déconnecter le téléphone (pour en appairer un autre)
+    phoneLinkDisconnect();
+    pageDirty = true;
+    return;
+  }
+#else
   if (e[3] == BE_VLONG) {  // BTN4 (BOOT) 5 s : oublier le Wi-Fi
     tft.fillScreen(col::BG);
     gfx::text(scr(), FONT_B17, 160, 120, "Configuration Wi-Fi effacée", col::WHITE, gfx::AL_C);
     phoneLinkForgetWifi();
     return;
   }
+#endif
 
   if (modalReset) {
     if (e[2] == BE_LONG) {
@@ -320,7 +358,7 @@ void setup() {
   tft.setRotation(TFT_ROTATION);  // paysage 320x240
   tft.fillScreen(col::BG);
 
-  phoneLinkBegin();  // Wi-Fi, portail et WebSocket dans une tâche sur le cœur 0
+  phoneLinkBegin();  // Wi-Fi + WebSocket (tâche sur le cœur 0), ou annonce Bluetooth LE (variante dashboard-ble)
 }
 
 void loop() {

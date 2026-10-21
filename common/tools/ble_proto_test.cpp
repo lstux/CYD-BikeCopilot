@@ -96,6 +96,19 @@ int main() {
     bleCivilFromDays(2147483648u / 86400, y, m, d);
     CHECK(y == 2038 && m == 1 && d == 19);
   }
+  // Décodage « brut » (BleGps)
+  {
+    BleGps g;
+    CHECK(bleParseGpsFeed(FULL, sizeof FULL, g));
+    CHECK(near(g.lat, 48.8566) && near(g.lon, 2.3522));
+    CHECK(g.speedValid && near(g.kmh, 23.4, 1e-4) && g.courseValid && near(g.course, 187.5, 1e-4));
+    CHECK(g.altValid && near(g.alt, 35) && g.accValid && near(g.accM, 6) && g.sats == 12);
+    CHECK(g.utc == 1792578907u);
+    CHECK(bleParseGpsFeed(UNKNOWN, sizeof UNKNOWN, g) && !g.speedValid && !g.altValid && !g.accValid && g.utc == 0);
+    CHECK(!bleParseGpsFeed(FULL, 10, g));
+    const uint8_t other[] = {0x02, 0x00};
+    CHECK(!bleParseGpsFeed(other, sizeof other, g));
+  }
   // Device Info
   {
     uint8_t buf[8];

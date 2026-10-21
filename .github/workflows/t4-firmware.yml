@@ -1,0 +1,47 @@
+name: T4 firmware
+
+# Compile le firmware de la LilyGO T4 (PlatformIO) : variante Wi-Fi/SensorServer (dashboard) et variante
+# Bluetooth LE (dashboard-ble). Le firmware.bin de chaque variante est publié en artefact.
+on:
+  push:
+    paths:
+      - "Lilygo-T4/**"
+      - "common/**"
+      - ".github/workflows/t4-firmware.yml"
+  pull_request:
+    paths:
+      - "Lilygo-T4/**"
+      - "common/**"
+      - ".github/workflows/t4-firmware.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # une variante en échec ne masque pas le résultat de l'autre
+      matrix:
+        env: [dashboard, dashboard-ble]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('Lilygo-T4/platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - run: pip install platformio
+
+      - name: Compilation (${{ matrix.env }})
+        run: pio run -d Lilygo-T4 -e ${{ matrix.env }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: T4-${{ matrix.env }}-firmware
+          path: Lilygo-T4/.pio/build/${{ matrix.env }}/firmware.bin
+          if-no-files-found: error

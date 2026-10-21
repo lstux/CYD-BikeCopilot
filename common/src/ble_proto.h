@@ -63,37 +63,76 @@ inline void bleCivilFromDays(int32_t z, uint16_t& y, uint8_t& m, uint8_t& d) {
   y = (uint16_t)(yy + (m <= 2));
 }
 
-// Décode un message GPS_FIX (charge utile seule, sans les 2 octets d'en-tête) dans `f`.
-// Les champs absents (message plus court : ancienne appli) restent « inconnus ». `f.valid` et `f.seq` sont mis à jour.
-inline bool bleDecodeGpsFix(const uint8_t* p, size_t len, Fix& f) {
+// Position décodée, en unités « physiques », pour les cartes qui ont leur propre structure (ex. PhoneSample de la T4).
+struct BleGps {
+  double lat = 0, lon = 0;
+  bool speedValid = false;
+  float kmh = 0;
+  bool courseValid = false;
+  float course = 0;  // degrés, 0 = nord
+  bool altValid = false;
+  float alt = 0;  // mètres
+  bool accValid = false;
+  float accM = 0;  // précision horizontale, mètres
+  uint8_t sats = 0;
+  uint32_t utc = 0;  // secondes Unix UTC, 0 = inconnu
+};
+
+// Décode la charge utile d'un GPS_FIX (sans les 2 octets d'en-tête). Les champs absents (message plus court :
+// ancienne appli) restent « inconnus ». Faux si lat/lon manquent.
+inline bool bleParseGpsPayload(const uint8_t* p, size_t len, BleGps& g) {
   if (len < 8) return false;  // lat + lon obligatoires
-  f.lat = (int32_t)bleU32(p) / 1e7;
-  f.lon = (int32_t)bleU32(p + 4) / 1e7;
-
-  f.speedValid = len >= 10 && bleU16(p + 8) != 0xFFFF;
-  f.kmh = f.speedValid ? bleU16(p + 8) / 10.0f : 0;
-
-  f.courseValid = len >= 12 && bleU16(p + 10) != 0xFFFF;
-  f.course = f.courseValid ? bleU16(p + 10) / 10.0f : 0;
-
+  g = BleGps();
+  g.lat = (int32_t)bleU32(p) / 1e7;
+  g.lon = (int32_t)bleU32(p + 4) / 1e7;
+  g.speedValid = len >= 10 && bleU16(p + 8) != 0xFFFF;
+  g.kmh = g.speedValid ? bleU16(p + 8) / 10.0f : 0;
+  g.courseValid = len >= 12 && bleU16(p + 10) != 0xFFFF;
+  g.course = g.courseValid ? bleU16(p + 10) / 10.0f : 0;
   const int16_t alt = len >= 14 ? (int16_t)bleU16(p + 12) : (int16_t)-32768;
-  f.altValid = alt != -32768;
-  f.alt = f.altValid ? alt : 0;
-
+  g.altValid = alt != -32768;
+  g.alt = g.altValid ? alt : 0;
   const uint8_t acc = len >= 15 ? p[14] : 255;
-  f.hdopValid = acc != 255;
-  f.hdop = f.hdopValid ? acc / 5.0f : 99;
+  g.accValid = acc != 255;
+  g.accM = g.accValid ? (float)acc : 0;
+  g.sats = len >= 16 ? p[15] : 0;
+  g.utc = len >= 20 ? bleU32(p + 16) : 0;
+  return true;
+}
 
-  f.sats = len >= 16 ? p[15] : 0;
+// Décode un message Feed complet (en-tête + charge utile) s'il s'agit d'un GPS_FIX valide.
+// Les types inconnus et les messages tronqués sont ignorés (faux).
+inline bool bleParseGpsFeed(const uint8_t* data, size_t len, BleGps& g) {
+  if (len < 2 || data[0] != BLE_MSG_GPS_FIX) return false;
+  const size_t plen = data[1];
+  if (plen > len - 2) return false;  // annonce plus longue que ce qui est arrivé
+  return bleParseGpsPayload(data + 2, plen, g);
+}
 
-  const uint32_t utc = len >= 20 ? bleU32(p + 16) : 0;
-  f.timeValid = f.dateValid = utc != 0;
+// Décode un message GPS_FIX (charge utile seule, sans les 2 octets d'en-tête) dans `f`.
+// `f.valid` et `f.seq` sont mis à jour.
+inline bool bleDecodeGpsFix(const uint8_t* p, size_t len, Fix& f) {
+  BleGps g;
+  if (!bleParseGpsPayload(p, len, g)) return false;
+  f.lat = g.lat;
+  f.lon = g.lon;
+  f.speedValid = g.speedValid;
+  f.kmh = g.kmh;
+  f.courseValid = g.courseValid;
+  f.course = g.course;
+  f.altValid = g.altValid;
+  f.alt = g.alt;
+  f.hdopValid = g.accValid;
+  f.hdop = g.accValid ? g.accM / 5.0f : 99;  // approximation : précision ≈ HDOP × 5 m
+  f.sats = g.sats;
+
+  f.timeValid = f.dateValid = g.utc != 0;
   if (f.timeValid) {
-    const uint32_t secs = utc % 86400;
+    const uint32_t secs = g.utc % 86400;
     f.hour = (uint8_t)(secs / 3600);
     f.minute = (uint8_t)(secs % 3600 / 60);
     f.second = (uint8_t)(secs % 60);
-    bleCivilFromDays((int32_t)(utc / 86400), f.year, f.month, f.day);
+    bleCivilFromDays((int32_t)(g.utc / 86400), f.year, f.month, f.day);
   } else {
     f.hour = f.minute = f.second = 0;
     f.year = 0;

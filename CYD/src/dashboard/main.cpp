@@ -95,6 +95,10 @@ static float etaSpeedKmh() {
   return v < 5.0f ? 5.0f : v;
 }
 
+#include <SD.h>
+#include <SPI.h>
+SPIClass sdSPI(VSPI);  // broches de la SD propres à la carte (voir config.h)
+bool sdOk = false;
 #include "maptheme.h"
 #include "mappage.h"
 
@@ -135,6 +139,7 @@ static void setHome(double la, double lo) {
   updateDestination();
 }
 #include "histpage.h"
+#include "histtouch.h"
 #include "settingspage.h"
 
 // --- Menu « Destination » (page Direction) ----------------------------------------------------

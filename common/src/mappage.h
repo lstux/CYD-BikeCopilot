@@ -6,8 +6,8 @@
 // éléments d'interface par-dessus, puis on envoie la bande à l'écran. Pas de scintillement
 // et pas besoin d'un tampon plein écran (trop gros pour la mémoire de l'ESP32).
 //
-// Ce fichier est inclus par main.cpp, après la définition de tft, gps, compass, col::,
-// destLat/destLon, currentKmh() et pollGps().
+// Ce fichier est inclus par main.cpp, après la définition de tft, fix, compass, col::, destLat/destLon,
+// sdOk (carte SD montée), mapLight, currentKmh() et pollGps().
 #include <SD.h>
 #include <SPI.h>
 #include "tiles.h"
@@ -17,8 +17,6 @@
 TFT_eSprite band(&tft);
 TileCache tiles;
 Track track;
-SPIClass sdSPI(VSPI);
-bool sdOk = false;
 
 static int mapZoomIdx = 3;
 static bool mapShownLight = false;  // les tuiles affichées sont-elles celles du thème clair ?

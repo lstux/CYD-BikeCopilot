@@ -134,80 +134,47 @@ static void histOpen(int rank) {
   }
 }
 
-// Glissé vertical dans la liste (une ligne tous les ~22 px)
-static void histDrag(int dy) {
-  if (histSel >= 0 || histN <= pg_trips::ROWS) return;
-  histAcc += dy;
-  int old = histTop;
-  while (histAcc <= -22 && histTop < histN - pg_trips::ROWS) { histTop++; histAcc += 22; }
-  while (histAcc >= 22 && histTop > 0) { histTop--; histAcc -= 22; }
-  if (histTop == 0 && histAcc > 0) histAcc = 0;
-  if (histTop >= histN - pg_trips::ROWS && histAcc < 0) histAcc = 0;
+// --- Actions (déclenchées par le tactile sur la CYD, par des boutons ailleurs) ---
+
+// Affiche la fenêtre « Supprimer ce trajet ? »
+static void histAskDelete() {
+  histConfirm = true;
+  pg_trips::drawConfirmDelete(scr());
+}
+
+// Réponse à la fenêtre : supprime le trajet affiché (ok) ou referme la fenêtre
+static void histAnswerDelete(bool ok) {
+  using namespace pg_trips;
+  histConfirm = false;
+  if (!ok) {
+    drawHistDetail();
+    return;
+  }
+  char name[24];
+  snprintf(name, sizeof(name), "%s", hist[histN - 1 - histSel].name);
+  tripDelete(name);
+  histN = indexLoad(hist, HIST_MAX);
+  if (histTop >= histN) histTop = histN > ROWS ? histN - ROWS : 0;
+  histBack();
+}
+
+// « Destination » : choisit la fin du trajet affiché
+static void histSetDestFromTrip() {
+  char p[64];
+  double la, lo;
+  tripPath(histCur.name, p, sizeof(p));
+  if (tripLastPoint(p, la, lo)) {
+    chooseDest(DM_POINT, la, lo);
+    histDestSet = true;
+    pg_trips::drawDetailHeader(scr(), histCur, cfg.tz, true);
+  }
+}
+
+// Fait défiler la liste de n lignes (n < 0 : vers le haut)
+static void histScroll(int n) {
+  int old = histTop, mx = histN > pg_trips::ROWS ? histN - pg_trips::ROWS : 0;
+  histTop += n;
+  if (histTop < 0) histTop = 0;
+  if (histTop > mx) histTop = mx;
   if (histTop != old) drawHistRows();
-}
-
-// Curseur des courbes : x = position du doigt à l'écran
-static void histCursorAt(int x) {
-  using namespace pg_trips;
-  if (histSel < 0 || !histSprOk || histConfirm) return;
-  int c = x - 5 - CH_X0;
-  const int W = CH_X1 - CH_X0 + 1;
-  if (c < 0) c = 0;
-  if (c > W - 1) c = W - 1;
-  if (c == histCursor) return;
-  histCursor = c;
-  histDrawCharts();
-}
-
-// Retourne true si le toucher a été traité par la page
-static bool histTap(int x, int y) {
-  using namespace pg_trips;
-  if (histSel >= 0) {
-    if (histConfirm) {
-      if (y >= 118 && y <= 148 && x >= 160 && x <= 270) {  // confirmer
-        char name[24];
-        snprintf(name, sizeof(name), "%s", hist[histN - 1 - histSel].name);
-        tripDelete(name);
-        histConfirm = false;
-        histN = indexLoad(hist, HIST_MAX);
-        if (histTop >= histN) histTop = histN > ROWS ? histN - ROWS : 0;
-        histBack();
-      } else {  // annuler (ou toucher à côté)
-        histConfirm = false;
-        drawHistDetail();
-      }
-      return true;
-    }
-    if (y < 46) {
-      if (x >= 236) {
-        histConfirm = true;
-        drawConfirmDelete(scr());
-      } else if (x >= 166) {  // « Destination » : fin de ce trajet
-        char p[64];
-        double la, lo;
-        tripPath(histCur.name, p, sizeof(p));
-        if (tripLastPoint(p, la, lo)) {
-          chooseDest(DM_POINT, la, lo);
-          histDestSet = true;
-          drawDetailHeader(scr(), histCur, cfg.tz, true);
-        }
-      } else {
-        histBack();  // en-tête : retour à la liste
-      }
-    } else if (y >= CHART_Y[0]) {
-      histCursorAt(x);
-    }
-    return true;
-  }
-  histAcc = 0;
-  if (x >= 303) {  // barre de défilement : page précédente / suivante
-    int old = histTop;
-    if (y < LIST_Y + ROWS * ROW_H / 2) histTop = histTop > ROWS ? histTop - ROWS : 0;
-    else if (histTop + ROWS < histN) histTop = histTop + ROWS > histN - ROWS ? histN - ROWS : histTop + ROWS;
-    if (histTop != old) drawHistRows();
-    return true;
-  }
-  int r = (y - LIST_Y) / ROW_H;
-  if (y >= LIST_Y && r >= 0 && r < ROWS && histTop + r < histN) histOpen(histTop + r);
-  return true;
 }

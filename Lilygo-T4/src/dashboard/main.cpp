@@ -347,6 +347,20 @@ static void renderSlow() {
   else drawLinkPage();
 }
 
+// --- Diagnostic (à retirer quand l'écran est validé) ---
+// Autotest au démarrage : rouge, vert, bleu (0,5 s chacun). Si l'écran reste blanc ici, le problème est
+// le câblage / l'initialisation de l'écran, pas le logiciel de la page.
+// Et une ligne « [diag] » par seconde sur le moniteur série.
+static void selfTestScreen() {
+  const uint16_t colors[3] = {0xF800, 0x07E0, 0x001F};  // rouge, vert, bleu (RGB565)
+  for (int i = 0; i < 3; i++) {
+    tft.fillScreen(colors[i]);
+    delay(500);
+  }
+  tft.fillScreen(col::BG);
+  Serial.println("[diag] autotest écran terminé (rouge, vert, bleu)");
+}
+
 void setup() {
   Serial.begin(115200);
   for (int i = 0; i < 3; i++) pinMode(BTN_PINS[i], INPUT);  // GPIO37-39 : pas de pull-up interne, la carte en a un
@@ -356,7 +370,9 @@ void setup() {
 
   tft.init();
   tft.setRotation(TFT_ROTATION);  // paysage 320x240
+  selfTestScreen();
   tft.fillScreen(col::BG);
+  Serial.printf("[diag] démarrage : heap libre %u octets\n", (unsigned)ESP.getFreeHeap());
 
   phoneLinkBegin();  // Wi-Fi + WebSocket (tâche sur le cœur 0), ou annonce Bluetooth LE (variante dashboard-ble)
 }
@@ -381,6 +397,12 @@ void loop() {
   if (modalReset) {  // fenêtre de confirmation : on ne redessine pas dessous
     delay(1);
     return;
+  }
+  static uint32_t lastDiag = 0;
+  if (now - lastDiag >= 1000) {
+    lastDiag = now;
+    Serial.printf("[diag] t=%lus page=%d sprOk=%d pageDirty=%d heap=%u fix=%d\n", (unsigned long)(now / 1000), page,
+                  (int)sprOk, (int)pageDirty, (unsigned)ESP.getFreeHeap(), (int)fix.valid);
   }
   if (now - lastFrame >= 40) {  // ~25 images/s
     lastFrame = now;

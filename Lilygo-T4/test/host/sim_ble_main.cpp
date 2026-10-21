@@ -86,7 +86,8 @@ int main(int argc, char **argv) {
   // 2. la carte s'annonce, aucun téléphone
   fakeInfo.bleAdvertising = true;
   run(600);
-  press(38, 200);  // BTN2 : page Liaison
+  press(38, 200);  // BTN2 : page carte
+  press(38, 1200);  // BTN2 maintenu : page Liaison
   run(600);
   shot("ble_2_attente");
 
@@ -99,7 +100,8 @@ int main(int argc, char **argv) {
   shot("ble_3_connecte");
 
   // 4. retour à la jauge, croisière
-  press(37, 200);
+  press(37, 200);  // BTN1 : carte
+  press(37, 1200);  // BTN1 maintenu : jauge
   feed(15, 5000);
   feed(24, 8000);
   run(400);

@@ -37,7 +37,7 @@ static void mapMessage(const char *msg, uint16_t color) {
   tft.fillRect(0, 20, 320, 206, col::BG);
   Surf s = onScreen(tft, col::BG);
   text(s, FONT_B17, 160, 125, msg, color, AL_C);
-  hud::pageDots(s, 2, NB_PAGES);
+  hud::pageDots(s, MAP_PAGE_IDX, NB_PAGES);
 }
 
 static float navHeading(float kmh) {

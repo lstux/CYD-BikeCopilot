@@ -4,6 +4,11 @@
 #include "hud.h"
 using namespace gfx;
 
+// Index de la page carte dans la liste des pages (pour les puces de pages). CYD : 2 (par défaut).
+#ifndef MAP_PAGE_IDX
+#define MAP_PAGE_IDX 2
+#endif
+
 static const int MAP_Y0 = 0, MAP_H = 240, BAND_H = 20;  // carte plein écran, composée en 12 bandes
 static const int MAP_CX = 160, MAP_CY = 150;                  // la position est dans le tiers bas : on voit devant
 static const uint8_t MAP_ZOOMS[5] = {13, 14, 15, 16, 17};
@@ -286,6 +291,6 @@ static void drawMapOverlay(TFT_eSprite &band, int by, const MapView &v, int zoom
     hline(S, x0 + 12, y0 + 66, POP_W - 24, col::BORDER);
     text(c, FONT_S13, x0 + POP_W / 2, y0 + 86, "Annuler", col::SEC, AL_C);
   }
-  if (by >= 220) hud::pageDots(S, 2, nPages, false);
+  if (by >= 220) hud::pageDots(S, MAP_PAGE_IDX, nPages, false);
 }
 

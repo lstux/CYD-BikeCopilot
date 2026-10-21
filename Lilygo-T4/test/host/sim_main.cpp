@@ -95,7 +95,10 @@ int main(int argc, char **argv) {
   fakeInfo.apClients = 0;
   run(600);
   shot("t4_2_barre_ap");
-  press(38, 200);  // BTN2 : page suivante (liaison)
+  press(38, 200);  // BTN2 : page suivante (carte)
+  run(600);
+  shot("t4_3_carte_sans_sd");
+  press(38, 1200);  // BTN2 maintenu sur la carte : page suivante (liaison)
   run(600);
   shot("t4_3_liaison_ap");
 
@@ -108,7 +111,9 @@ int main(int argc, char **argv) {
   feed(0, 3000);
   run(600);
   shot("t4_4_liaison_ok");
-  press(37, 200);  // BTN1 : page précédente (jauge)
+  press(37, 200);  // BTN1 : page précédente (carte)
+  run(300);
+  press(37, 1200);  // BTN1 maintenu sur la carte : page précédente (jauge)
   run(300);
 
   // 4. trajet : accélération puis croisière à 24 km/h, avec une pointe

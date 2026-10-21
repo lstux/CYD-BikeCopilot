@@ -59,6 +59,7 @@ class TFT_eSprite : public TFT_eSPI {
     return buf;
   }
   void deleteSprite() {}
+  void *getPointer() { return buf; }
   void fillSprite(uint32_t c) { fillRect(0, 0, W, H, c); }
   void pushSprite(int x, int y) {
     for (int j = 0; j < H; j++)

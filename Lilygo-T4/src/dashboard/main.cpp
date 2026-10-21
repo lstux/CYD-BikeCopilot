@@ -1,6 +1,7 @@
 // BikeCopilot - LilyGO T4 V1.3 (ESP32 + ILI9341 320x240, 4 boutons), position fournie par le téléphone.
 // Page 0 : jauge de vitesse à échelle adaptative + statistiques du trajet
-// Page 1 : état de la liaison avec le téléphone (Wi-Fi, SensorServer, dernière position)
+// Page 1 : carte OSM (tuiles sur la SD, trace GPX, position) : BTN1/BTN2 = zoom, BTN3 = recentrer
+// Page 2 : état de la liaison avec le téléphone (Wi-Fi, SensorServer, dernière position)
 //
 // Le téléphone envoie sa position via l'appli Android SensorServer (voir phonelink.cpp, tâche sur
 // le cœur 0). phoneApply() la convertit en Fix, comme gpsfix.h le fait pour le GPS série de la CYD.
@@ -17,6 +18,7 @@
 #include "speed.h"
 #include "buttons.h"
 #include "status.h"
+#include "mapboard.h"  // compass, thème, destination et carte SD pour la page carte
 
 TFT_eSPI tft;
 TFT_eSprite spr(&tft);
@@ -30,7 +32,9 @@ static GaugeScale scale;
 static Button btn[4];
 static const uint8_t BTN_PINS[4] = {BTN1_PIN, BTN2_PIN, BTN3_PIN, BTN4_PIN};
 
-static const int NB_PAGES = 2;  // 0 compteur, 1 liaison téléphone
+static const int NB_PAGES = 3;  // 0 compteur, 1 carte, 2 liaison téléphone
+#define MAP_PAGE_IDX 1
+static const int PAGE_MAP = 1, PAGE_LINK = 2;
 static int page = 0;
 static bool pageDirty = true;
 static bool sprOk = false;
@@ -38,6 +42,53 @@ static bool modalReset = false;  // fenêtre « Remettre à zéro ? » affichée
 static bool frameForce = true;
 
 static PhoneLinkInfo linkInfo;
+
+// Variables de la page carte (common/src/mappage.h) : dernière position connue et appui long
+bool lastFixOk = false;
+double lastFixLat = 0, lastFixLon = 0;
+bool mapPopOpen = false;
+int mapPopX = 0, mapPopY = 0;
+double mapPopLat = 0, mapPopLon = 0;
+
+static float currentKmh() { return speed.kmh; }
+
+static void localClock(char *out, size_t n);  // défini plus bas (heure locale)
+
+// État affiché par la barre de la carte (pas de satellites : le téléphone ne les donne pas)
+static hud::Status currentStatus() {
+  hud::Status st;
+  st.fix = fix.valid;
+  st.sats = 0;
+  st.rec = 0;
+  localClock(st.clock, sizeof(st.clock));
+  return st;
+}
+
+// Vitesse retenue pour l'heure d'arrivée estimée (même règle que la CYD)
+static float etaSpeedKmh() {
+  float v = 15.0f;
+  if (trip.movingMs > 60000) v = (float)(trip.distM / 1000.0) / (trip.movingMs / 3600000.0f);
+  else if (currentKmh() > 8) v = currentKmh();
+  return v < 5.0f ? 5.0f : v;
+}
+
+#include "mappage.h"  // page carte commune : tuiles, trace, position (définit `band` et `track`)
+
+// Destination : point choisi, domicile, sinon fin de la trace GPX (même ordre que la CYD, sans l'ordre des modes inconnus)
+static void setDestPoint(double la, double lo) {
+  destLat = la;
+  destLon = lo;
+  destValid = true;
+}
+static void updateDestination() {
+  bool home = cfg.homeOk, trk = track.valid(), pt = cfg.pointOk;
+  int m = cfg.destMode;
+  if (m == DM_POINT && pt) setDestPoint(cfg.pointLat, cfg.pointLon);
+  else if (m == DM_HOME && home) setDestPoint(cfg.homeLat, cfg.homeLon);
+  else if (trk) setDestPoint(track.destLat(), track.destLon());
+  else if (home) setDestPoint(cfg.homeLat, cfg.homeLon);
+  else destValid = false;
+}
 
 static gfx::Surf scr() { return gfx::onScreen(tft, col::BG); }
 
@@ -292,6 +343,19 @@ static void handleButtons(uint32_t now) {
     return;
   }
 
+  if (page == PAGE_MAP) {  // carte : appuis courts = zoom / recentrer, appuis longs = page précédente / suivante
+    if (e[0] == BE_SHORT) mapZoomStep(-1);
+    else if (e[1] == BE_SHORT) mapZoomStep(+1);
+    else if (e[2] == BE_SHORT && mapPanned()) mapRecenter();
+    else if (e[0] == BE_LONG) {
+      page = 0;
+      pageDirty = true;
+    } else if (e[1] == BE_LONG) {
+      page = PAGE_LINK;
+      pageDirty = true;
+    }
+    return;
+  }
   if (e[0] == BE_SHORT) {  // page précédente
     page = (page + NB_PAGES - 1) % NB_PAGES;
     pageDirty = true;
@@ -313,16 +377,24 @@ static void enterPage() {
   tft.fillScreen(col::BG);
   frameForce = true;
   if (page == 0) sprOk = makeSprite(pg_gauge::SW, pg_gauge::SH);
-  else {
+  else if (page == PAGE_MAP) {
+    spr.deleteSprite();
+    band.deleteSprite();
+    band.setColorDepth(16);
+    sprOk = band.createSprite(320, BAND_H) != nullptr;
+    mapEnter();
+  } else {
     spr.deleteSprite();
     sprOk = true;
   }
   memset(statCache, 0, sizeof(statCache));
   memset(lineCache, 0, sizeof(lineCache));
 
-  drawStatusBar(true);
+  if (page != PAGE_MAP) {  // la carte dessine sa propre barre d'état et ses puces
+    drawStatusBar(true);
+    hud::pageDots(scr(), page, NB_PAGES);
+  }
   if (page == 0) pg_gauge::drawTileFrames(scr());
-  hud::pageDots(scr(), page, NB_PAGES);
   if (!sprOk) {
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(col::ORANGE, col::BG);
@@ -332,7 +404,12 @@ static void enterPage() {
 }
 
 static void renderFrame(uint32_t now) {
-  if (!sprOk || page != 0) return;
+  if (!sprOk) return;
+  if (page == PAGE_MAP) {
+    renderMapPage(now);
+    return;
+  }
+  if (page != 0) return;
   float kmh = speed.kmh;
   scale.update(kmh, now, cfg.gaugeMin);
   needleKmh += (kmh - needleKmh) * 0.3f;  // lissage de l'aiguille
@@ -342,9 +419,9 @@ static void renderFrame(uint32_t now) {
 
 static void renderSlow() {
   phoneLinkGetInfo(linkInfo);
-  drawStatusBar();
+  if (page != PAGE_MAP) drawStatusBar();  // la carte dessine sa propre barre
   if (page == 0) drawStats();
-  else drawLinkPage();
+  else if (page == PAGE_LINK) drawLinkPage();
 }
 
 void setup() {
@@ -358,6 +435,14 @@ void setup() {
   tft.setRotation(TFT_ROTATION);  // paysage 320x240
   tft.fillScreen(col::BG);
 
+  // Carte SD : tuiles, trace GPX
+  sdSPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+  sdOk = SD.begin(SD_CS_PIN, sdSPI, 20000000, "/sd", 8);
+  Serial.printf("Carte SD : %s\n", sdOk ? "OK" : "absente");
+  if (sdOk && track.load(GPX_PATH)) Serial.printf("Trace GPX : %d points\n", (int)track.count());
+  mapLight = cfg.mapTheme == MT_LIGHT;
+  updateDestination();
+
   phoneLinkBegin();  // Wi-Fi + WebSocket (tâche sur le cœur 0), ou annonce Bluetooth LE (variante dashboard-ble)
 }
 
@@ -368,6 +453,11 @@ void loop() {
   PhoneSample ps;
   phoneLinkGetSample(ps);
   phoneApply(fix, phoneTrk, ps, now);
+  if (fix.valid) {  // dernière position connue (la carte s'y centre sans signal)
+    lastFixOk = true;
+    lastFixLat = fix.lat;
+    lastFixLon = fix.lon;
+  }
   bool accOk = !phoneTrk.accValid || phoneTrk.acc <= SPEED_ACC_MAX_M;
   speed.update(now, fix, accOk);
   trip.update(now, fix, speed);

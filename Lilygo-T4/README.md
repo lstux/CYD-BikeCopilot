@@ -14,9 +14,10 @@ Le code d'affichage vient de [`../common`](../common/README.md).
 | Page | Contenu | État |
 |---|---|---|
 | 1. Compteur | jauge de vitesse à échelle adaptative (même code que la CYD), distance, temps roulant, dénivelé, moyenne, max, altitude | codée |
-| 2. Liaison | état de la liaison téléphone (Wi-Fi + SensorServer, ou Bluetooth LE) et dernière position reçue | codée |
+| 2. Carte | carte OSM (tuiles sur la SD), trace GPX, position, destination ; zoom et recentrage aux boutons | codée, à tester avec une carte SD |
+| 3. Liaison | état de la liaison téléphone (Wi-Fi + SensorServer, ou Bluetooth LE) et dernière position reçue | codée |
 
-Pas encore : boussole (la T4 n'a pas de capteur, le cap vient du téléphone), carte, trajets, réglages, carte SD.
+Pas encore : boussole (la T4 n'a pas de capteur, le cap vient du téléphone), trajets, réglages. La carte SD sert aux tuiles et à la trace GPX (`/route.gpx`) ; elle est lue, jamais écrite.
 
 ## Utilisation : deux liaisons au choix
 
@@ -41,9 +42,9 @@ Protocole : [`common/ble/PROTOCOL.md`](../common/ble/PROTOCOL.md). Côté carte 
 
 | Bouton | GPIO | Action |
 |---|---|---|
-| BTN1 | 37 | appui court : page précédente |
-| BTN2 | 38 | appui court : page suivante |
-| BTN3 | 39 | appui long (page Compteur) : remise à zéro du trajet, confirmée par un second appui long ; un autre bouton annule |
+| BTN1 | 37 | appui court : page précédente (sur la carte : zoom arrière) ; sur la carte, appui long : page Compteur |
+| BTN2 | 38 | appui court : page suivante (sur la carte : zoom avant) ; sur la carte, appui long : page Liaison |
+| BTN3 | 39 | appui long (page Compteur) : remise à zéro du trajet, confirmée par un second appui long ; un autre bouton annule. Sur la carte, appui court : recentrer sur la position |
 | BTN4 (BOOT) | 0 | appui de 5 s : oublier la configuration Wi-Fi et redémarrer (variante BLE : déconnecter le téléphone) |
 
 ## Compilation
@@ -74,12 +75,15 @@ src/dashboard/
   speed.h         vitesse filtrée, statistiques du trajet, échelle de la jauge
   buttons.h       antirebond, appui court / long / très long
   status.h        barre d'état (précision du point au lieu du nombre de satellites)
+  mapboard.h      pièces que la page carte commune attend de la T4 : pas de boussole, thème fixe, destination, carte SD (HSPI)
   phonelink.*     tâche Wi-Fi + WebSocket SensorServer (cœur 0)  [variante Wi-Fi]
   phone/          portail captif, mémorisation des réseaux, recherche de SensorServer  [variante Wi-Fi]
   blelink.cpp     périphérique BLE (NimBLE) : service BikeCopilot, écriture Feed -> PhoneSample  [variante BLE]
   blesample.h     message BLE GPS_FIX -> PhoneSample (logique pure, testée sur PC)
 test/host/        tests et simulateur sur PC (voir ci-dessous)
 ```
+
+La page carte est `common/src/mappage.h`, la même que sur la CYD. Pour la T4 : pas de boussole, thème clair/sombre réglé (pas de capteur de lumière), et la carte SD est sur le bus HSPI (broches de `config.h`) ; l'écran reste sur VSPI.
 
 `phone/` et `phonelink.cpp` viennent du firmware `phone-bridge` du dépôt [Waveshare-C6-1.47](https://github.com/lstux/Waveshare-C6-1.47), adaptés : variables renommées pour ne pas entrer en conflit avec les `cfg` du code commun, `MDNS.IP()` pour le core 2.0.x, tâche FreeRTOS. Les corrections faites d'un côté sont à reporter de l'autre tant que le code n'est pas partagé.
 

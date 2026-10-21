@@ -23,6 +23,12 @@
 #define SD_SCK_PIN     14
 #define SD_MISO_PIN    2
 #define SD_MOSI_PIN    15
+#define GPX_PATH       "/route.gpx"  // trace à suivre (dernier point = destination)
+
+// --- Page carte (common/src/mappage.h) : cap pris sur le téléphone au-dessus de ce seuil (pas de boussole) ---
+#define COURSE_MIN_KMH    6.0
+#define COMPASS_OFFSET_DEG 0.0
+#define COMPASS_INVERT     0
 
 // --- I2C (connecteur 5 broches) ---
 #define I2C_SDA_PIN    21

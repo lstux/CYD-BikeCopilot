@@ -12,12 +12,6 @@
 #endif
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
-
-// ESP.getFreeHeap() (diagnostic) : valeur fictive sur PC
-struct ESPShim {
-  uint32_t getFreeHeap() const { return 200000; }
-};
-static ESPShim ESP;
 #endif
 #define INPUT 0
 #define INPUT_PULLUP 2

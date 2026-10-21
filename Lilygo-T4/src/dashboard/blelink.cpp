@@ -5,6 +5,9 @@
 #include "phonelink.h"
 
 #ifdef PHONE_LINK_BLE
+// Preferences : utilisée par common/settings.h ; PlatformIO ne la détecte que si un fichier du projet l'inclut
+// (dans la variante Wi-Fi c'est phone/netconfig.cpp, exclu ici).
+#include <Preferences.h>
 #include <NimBLEDevice.h>
 #include "ble_proto.h"
 #include "blesample.h"

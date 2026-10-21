@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false # une variante en échec ne masque pas le résultat de l'autre
       matrix:
-        env: [dashboard, dashboard-ble]
+        env: [dashboard, dashboard-ble, screen-ili9341, screen-st7789]
     steps:
       - uses: actions/checkout@v4
 

@@ -5,7 +5,7 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${1:-$HERE/out}"
 mkdir -p "$OUT"
-g++ -std=gnu++11 -O1 -Wall -Wextra -I"$HERE" -I"$HERE/../../src/dashboard" "$HERE/sim.cpp" -o "$OUT/sim"
+g++ -std=gnu++11 -O1 -Wall -Wextra -I"$HERE" -I"$HERE/../../src/dashboard" -I"$HERE/../../../common/src" "$HERE/sim.cpp" -o "$OUT/sim"
 "$OUT/sim" "$OUT"
 python3 - "$OUT" <<'PY'
 import sys, glob, os

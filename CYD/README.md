@@ -74,9 +74,9 @@ La SD est sur le bus VSPI (IO5/18/19/23), l'écran sur HSPI (`-DUSE_HSPI_PORT`).
 
 ## Interface, polices et simulateur
 
-L'interface est dessinée par une petite couche graphique maison (`src/dashboard/gfx.h`) au-dessus de TFT_eSPI : cercles, arcs, lignes et polygones anticrénelés, texte en niveaux de gris. Les pages dynamiques (jauge, boussole, carte) sont composées dans un sprite partiel, car la mémoire ne permet pas un tampon plein écran.
+L'interface est dessinée par une petite couche graphique maison (`common/src/gfx.h`, partagée avec les autres cartes) au-dessus de TFT_eSPI : cercles, arcs, lignes et polygones anticrénelés, texte en niveaux de gris. Les pages dynamiques (jauge, boussole, carte) sont composées dans un sprite partiel, car la mémoire ne permet pas un tampon plein écran.
 
-- **Polices** : Inter (Bold / SemiBold / Medium), générées en bitmaps par `CYD/tools/make_fonts.py` (Pillow) dans `fonts_data.h`. Inter est sous licence SIL OFL 1.1 (https://rsms.me/inter/).
+- **Polices** : Inter (Bold / SemiBold / Medium), générées en bitmaps par `common/tools/make_fonts.py` (Pillow) dans `common/src/fonts_data.h`. Inter est sous licence SIL OFL 1.1 (https://rsms.me/inter/).
 - **Simulateur** : `CYD/tools/sim/build.sh <dossier>` compile les pages sur PC avec de fausses données et écrit des PNG (compteur, direction, carte, trajets, détail, réglages), pratique pour régler la mise en page sans carte.
 
 ## Matériel

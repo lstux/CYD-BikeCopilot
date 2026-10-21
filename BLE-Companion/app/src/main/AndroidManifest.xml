@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Le manifeste est la « carte d'identité » de l'appli : ses écrans, ses services, et surtout les permissions qu'elle
+  peut demander. Une permission absente d'ici ne peut pas être accordée, même si l'utilisateur est d'accord.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Bluetooth : Android 12+ (BLUETOOTH_SCAN / BLUETOOTH_CONNECT), avant : les anciennes permissions (jusqu'à l'API 30). -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Position (GPS) : précise pour la lecture du GPS, et exigée par le scan BLE avant Android 12. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Service de premier plan : un type par usage (position, appareil connecté), exigé depuis Android 14. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- L'appli n'a aucun sens sans BLE : le Play Store (ou l'installation) l'écartera des téléphones qui n'en ont pas. -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".BridgeService"
+            android:exported="false"
+            android:foregroundServiceType="location|connectedDevice" />
+    </application>
+</manifest>

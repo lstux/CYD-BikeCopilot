@@ -10,6 +10,7 @@ Chaque projet PlatformIO l'ajoute à son chemin d'inclusion (`-I$PROJECT_DIR/../
 | `theme.h` | couleurs |
 | `hud.h`, `page_gauge.h`, `page_compass.h`, `page_map.h`, `page_trips.h` | pages : dessin pur à partir de données |
 | `fix.h` | struct `Fix` : position, vitesse, cap, altitude, satellites, heure… indépendante de la source |
+| `ble_proto.h` | protocole BLE avec l'appli [BLE-Companion](../BLE-Companion/README.md) : UUID, décodage du message GPS → `Fix` (spécification : [`ble/PROTOCOL.md`](ble/PROTOCOL.md)) |
 | `geo.h` | projection Web Mercator, distance et cap entre deux points |
 | `tiles.h` | cache de tuiles `.raw` sur SD (`<dossier>/<z>/<x>/<y>.raw`) |
 | `track.h` | trace GPX/CSV sur SD |
@@ -26,8 +27,9 @@ appellent leurs fonctions d'action (voir `CYD/src/dashboard/histtouch.h` pour un
 
 ## `tools/`
 - `make_fonts.py` : régénère `src/fonts_data.h` (`python3 common/tools/make_fonts.py`).
+- `ble_proto_test.cpp` : test sur PC du décodeur BLE (`g++ -std=c++17 -I common/src common/tools/ble_proto_test.cpp -o /tmp/ble_proto_test && /tmp/ble_proto_test`).
 
 ## Hors de `common/` (propre à chaque carte)
 Configuration des broches (`config.h`), SD (`sdSPI`), entrées (tactile ou boutons : `touch.h`, `histtouch.h`), page Réglages (`settingspage.h`, propre aux capteurs de la carte), luminosité (`maptheme.h`), `main.cpp`, et l'adaptateur qui remplit la `Fix` :
 - CYD : `CYD/src/dashboard/gpsfix.h` (TinyGPSPlus → `Fix`)
-- T4 : à écrire (position reçue du téléphone → `Fix`, en incrémentant `seq` à chaque point)
+- T4 : à écrire (position reçue du téléphone → `Fix`, en incrémentant `seq` à chaque point). Pour le BLE, `ble_proto.h` fait le décodage : la carte expose le service/les caractéristiques définis dans `ble/PROTOCOL.md` et passe chaque écriture reçue dans *Feed* à `bleHandleFeedWrite()`.

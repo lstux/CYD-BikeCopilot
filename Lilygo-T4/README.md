@@ -3,7 +3,7 @@
 Version ESP32 d'origine (pas la S3).
 
 Matériel : ESP32, écran ILI9341 320×240 (comme la CYD), 4 boutons (3 utilisateur + BOOT, pas de tactile), lecteur microSD, 8 Mo de PSRAM. Brochage et caractéristiques : [`Hardware.md`](Hardware.md).
-Position : fournie par le téléphone (Wi-Fi, appli Android **SensorServer**), pas de GPS embarqué.
+Position : fournie par le téléphone, pas de GPS embarqué : en Wi-Fi (appli Android **SensorServer**) ou en Bluetooth LE (appli [BLE-Companion](../BLE-Companion/README.md), protocole dans [`common/ble/PROTOCOL.md`](../common/ble/PROTOCOL.md)).
 
 Le code d'affichage vient de [`../common`](../common/README.md).
 

@@ -1,0 +1,41 @@
+name: BLE-Companion
+
+# Compile l'appli Android, lance les tests du protocole et publie l'APK de debug (onglet Actions -> l'exécution -> Artifacts).
+on:
+  push:
+    paths:
+      - "BLE-Companion/**"
+      - ".github/workflows/ble-companion.yml"
+  pull_request:
+    paths:
+      - "BLE-Companion/**"
+      - ".github/workflows/ble-companion.yml"
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: BLE-Companion
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Installe Gradle 8.10.2 (le dépôt ne contient pas gradlew) et met en cache les dépendances.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Tests du protocole + compilation de l'APK de debug
+        run: gradle testDebugUnitTest assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BLE-Companion-debug-apk
+          path: BLE-Companion/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
